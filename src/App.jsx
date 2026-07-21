@@ -313,13 +313,40 @@ function searchLibrary(q) {
 function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState(null);
+  const [remote, setRemote] = useState([]);
+  const [fetching, setFetching] = useState(false);
   const inputRef = React.useRef(null);
-  const results = searchLibrary(value);
+  const timerRef = React.useRef(null);
+  const local = searchLibrary(value);
+  const seen = new Set(local.map((x) => x.t));
+  const results = [...local, ...remote.filter((x) => !seen.has(x.t))].slice(0, 8);
   const measure = () => {
     if (inputRef.current) setRect(inputRef.current.getBoundingClientRect());
   };
-  // fixed positioning escapes any overflow/scroll container (fixes clipping
-  // when the row sits low on the page); flip upward if short on space below
+  const queueRemote = (q) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!q || q.trim().length < 2) { setRemote([]); return; }
+    timerRef.current = setTimeout(async () => {
+      try {
+        const r = await fetch("/api/claude?search=" + encodeURIComponent(q.trim()));
+        const data = await r.json();
+        setRemote(data.results || []);
+      } catch (e) { setRemote([]); }
+    }, 350);
+  };
+  const pick = async (r) => {
+    setOpen(false);
+    if (r.vol != null) { onSelect(r); return; }
+    setFetching(true);
+    let vol = 30;
+    try {
+      const resp = await fetch("/api/claude?vol=" + encodeURIComponent(r.t));
+      const data = await resp.json();
+      if (data.vol) vol = data.vol;
+    } catch (e) {}
+    setFetching(false);
+    onSelect({ ...r, vol });
+  };
   const DROP_H = 236;
   const flipUp = rect && window.innerHeight - rect.bottom < DROP_H && rect.top > DROP_H;
   const dropStyle = rect ? {
@@ -332,17 +359,17 @@ function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
   } : null;
   return (
     <div style={{ position: "relative", display: "inline-block", width }}>
-      <input ref={inputRef} value={value}
-        onChange={(e) => { onChange(e.target.value); measure(); setOpen(true); }}
+      <input ref={inputRef} value={fetching ? value + " …" : value}
+        onChange={(e) => { const v = e.target.value; onChange(v); queueRemote(v); measure(); setOpen(true); }}
         onFocus={() => { measure(); setOpen(true); }}
         onBlur={() => setTimeout(() => setOpen(false), 160)}
-        placeholder="Ticker or name"
+        placeholder="Any ticker or name"
         style={{ width: "100%", padding: "6px 8px", border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontFamily: T.ui, fontSize: 13, fontWeight: bold ? 700 : 500, color: T.ink, background: T.surface, outline: "none", boxSizing: "border-box" }} />
       {open && results.length > 0 && dropStyle && (
         <div style={dropStyle}>
           {results.map((r) => (
             <div key={r.t}
-              onMouseDown={(e) => { e.preventDefault(); onSelect(r); setOpen(false); }}
+              onMouseDown={(e) => { e.preventDefault(); pick(r); }}
               style={{ padding: "8px 10px", borderBottom: `1px solid ${T.rule}`, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "#1B2530")}
               onMouseLeave={(e) => (e.currentTarget.style.background = T.band)}>
@@ -350,10 +377,10 @@ function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{r.t}</span>
                 <span style={{ fontSize: 11.5, color: T.sub, marginLeft: 7 }}>{r.n}</span>
               </div>
-              <span style={{ fontSize: 10, color: T.faint, whiteSpace: "nowrap" }}>{r.sec} · σ~{r.vol}%</span>
+              <span style={{ fontSize: 10, color: T.faint, whiteSpace: "nowrap" }}>{r.vol != null ? r.sec + " · σ~" + r.vol + "%" : r.sec + " · live"}</span>
             </div>
           ))}
-          <div style={{ padding: "6px 10px", fontSize: 10, color: T.faint }}>Estimates are editable · not in the list? Type it and set your own figures.</div>
+          <div style={{ padding: "6px 10px", fontSize: 10, color: T.faint }}>Live results pull a year of prices to estimate volatility · always editable.</div>
         </div>
       )}
     </div>
