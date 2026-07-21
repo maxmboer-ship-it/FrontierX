@@ -478,7 +478,8 @@ const SCENARIOS = {
 export default function FrontierApp() {
   const [view, setView] = useState("landing");
   const [mode, setMode] = useState("basic"); // basic | advanced
-  const [plan, setPlan] = useState("free");
+  const [plan, setPlanRaw] = useState(() => { try { return localStorage.getItem("fx_plan") || "free"; } catch (e) { return "free"; } });
+  const setPlan = (p) => { setPlanRaw(p); try { localStorage.setItem("fx_plan", p); } catch (e) {} };
   const [showPaywall, setShowPaywall] = useState(false);
   const [showCheckout, setShowCheckout] = useState(null); // "advanced" | "pro" | null
   const [ckEmail, setCkEmail] = useState("");
@@ -1207,6 +1208,15 @@ export default function FrontierApp() {
           </Panel>
 
           {/* AI OBSERVATIONS — safeguarded */}
+          <Panel title={`Security news briefs${!isPro ? " · Pro" : ""}`}>
+            <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10 }}>Recent factual coverage for any holding — descriptive only:</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {assets.map((a, i) => (
+                <button key={i} onClick={() => runBrief(a.name)} style={{ fontFamily: T.ui, fontSize: 12, fontWeight: 700, padding: "7px 14px", borderRadius: 3, cursor: "pointer", border: `1px solid ${T.steel}`, background: "transparent", color: T.steel }}>{a.name} ↗</button>
+              ))}
+            </div>
+          </Panel>
+
           <Panel title={`AI observations${!isPro ? " · Pro" : ""}`}
             right={<Btn small primary onClick={runAiInsights}>{aiLoading ? "Analyzing…" : isPro ? "Generate" : "Unlock"}</Btn>} band>
             <div style={{ background: T.paper, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 14, fontSize: 11.5, color: T.sub, lineHeight: 1.55 }}>
