@@ -774,7 +774,7 @@ export default function FrontierApp() {
       {/* hero */}
       <div style={{ borderBottom: `1px solid ${T.rule}`, position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, opacity: 0.3 }}><HeroArt /></div>
-        <div style={{ maxWidth: 1300, margin: "0 auto", padding: "72px 16px 56px", position: "relative" }}>
+        <div style={{ maxWidth: 1360, margin: "0 auto", padding: "72px 16px 56px", position: "relative" }}>
           <div style={{ ...label, color: T.green, marginBottom: 14 }}>Portfolio analytics · Three tiers · Two free</div>
           <h1 style={{ fontFamily: T.disp, fontSize: 46, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.04, margin: "0 0 16px", maxWidth: 660, color: T.ink }}>
             Know exactly what your portfolio is doing.
@@ -792,7 +792,7 @@ export default function FrontierApp() {
       {/* live proof band */}
       {base && mc && (
         <div style={{ background: T.band, borderTop: `1px solid ${T.rule}`, borderBottom: `1px solid ${T.rule}` }}>
-          <div style={{ maxWidth: 1300, margin: "0 auto", padding: "18px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14 }}>
+          <div style={{ maxWidth: 1360, margin: "0 auto", padding: "18px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14 }}>
             {[
               { l: "Max Sharpe solved", v: num(base.tan.sharpe) },
               { l: "Frontier points", v: chart ? String(chart.frontier.length) : "—" },
@@ -809,7 +809,7 @@ export default function FrontierApp() {
       )}
 
       {/* tiers */}
-      <div style={{ maxWidth: 1300, margin: "0 auto", padding: "48px 16px" }}>
+      <div style={{ maxWidth: 1360, margin: "0 auto", padding: "48px 16px" }}>
         <h2 style={{ fontFamily: T.disp, fontSize: 28, fontWeight: 800, margin: "0 0 6px", color: T.ink }}>Built for how much finance you know.</h2>
         <p style={{ fontSize: 13.5, color: T.sub, margin: "0 0 24px", maxWidth: 560 }}>Never used anything beyond a brokerage app? Start Basic. Comfortable with volatility and correlation? Advanced is the full desk. Both free.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 0, border: `1px solid ${T.rule}` }}>
@@ -829,7 +829,7 @@ export default function FrontierApp() {
       </div>
 
       {/* final CTA */}
-      <div style={{ maxWidth: 1300, margin: "0 auto", padding: "48px 16px 40px", textAlign: "center" }}>
+      <div style={{ maxWidth: 1360, margin: "0 auto", padding: "48px 16px 40px", textAlign: "center" }}>
         <h2 style={{ fontFamily: T.disp, fontSize: 26, fontWeight: 800, margin: "0 0 8px", color: T.ink }}>Sixty seconds to your first read.</h2>
         <p style={{ fontSize: 13.5, color: T.sub, margin: "0 0 20px" }}>No signup. No card. No jargon unless you ask for it.</p>
         <Btn primary onClick={() => { setMode("basic"); setView("app"); }}>Check my portfolio</Btn>
@@ -842,7 +842,7 @@ export default function FrontierApp() {
 
   /* ═════════ BASIC MODE ═════════ */
   const BasicMode = () => (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: "20px 16px 48px" }}>
+    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "20px 16px 48px" }}>
       <Panel title="What do you own?">
         <p style={{ fontSize: 13, color: T.sub, margin: "0 0 14px", lineHeight: 1.6 }}>
           List your investments, roughly what each is worth, and how jumpy each one tends to be. Estimates are fine.
@@ -987,7 +987,7 @@ export default function FrontierApp() {
 
   /* ═════════ ADVANCED MODE ═════════ */
   const AdvancedMode = () => (
-    <div style={{ maxWidth: 1440, margin: "0 auto", padding: "16px 16px 48px" }}>
+    <div style={{ maxWidth: 1500, margin: "0 auto", padding: "16px 16px 48px" }}>
       <div style={{ background: T.paper, border: `1px solid ${T.rule}`, padding: "10px 14px", marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
         <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, color: T.sub }}>
           Risk-free <Field value={rf} onChange={setRf} w={52} /> %
@@ -1278,7 +1278,7 @@ export default function FrontierApp() {
                   <span style={{ fontFamily: T.ui, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(76,154,255,0.14)", color: T.steel, padding: "3px 8px", borderRadius: 2, marginRight: 8 }}>{it.category}</span>
                   <span style={{ fontFamily: T.disp, fontSize: 13.5, fontWeight: 800, color: T.ink }}>{it.title}</span>
                 </div>
-                <div style={{ fontSize: 13, lineHeight: 1.6, color: "#C7D1DB" }}>{it.note}</div>
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: "#C7D1DB" }}>{it.note}{it.url && <a href={it.url} target="_blank" rel="noreferrer" style={{ color: T.steel, fontWeight: 700, marginLeft: 8, textDecoration: "none" }}>Read article ↗</a>}</div>
               </div>
             ))}
             {briefData && briefData.modelNote && (
@@ -1292,7 +1292,7 @@ export default function FrontierApp() {
       )}
 
       <div style={{ borderBottom: `1px solid ${T.ruleDark}`, background: T.paper, position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: 1440, margin: "0 auto", padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
+        <div style={{ maxWidth: 1500, margin: "0 auto", padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
             <span onClick={() => setView("landing")} style={{ fontFamily: T.disp, fontWeight: 800, fontSize: 16, letterSpacing: "0.01em", cursor: "pointer", color: T.ink }}>
               FRONTIER <span style={{ color: T.green }}>X</span>
