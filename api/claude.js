@@ -5,10 +5,7 @@ export default async function handler(req, res) {
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
       {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-goog-api-key": key,
-        },
+        headers: { "content-type": "application/json", "x-goog-api-key": key },
         body: JSON.stringify(payload),
       }
     );
@@ -27,6 +24,19 @@ export default async function handler(req, res) {
     } catch (e) { return ""; }
   };
   if (req.method === "GET") {
+    const t = (req.query && req.query.brief) || "";
+    if (t) {
+      const q = { contents: [{ parts: [{ text: "Search for recent news about " + t + " stock and summarize the top 2 stories in one sentence each." }] }] };
+      const withSearch = await call({ ...q, tools: [{ google_search: {} }] });
+      const noSearch = await call(q);
+      return res.status(200).json({
+        searchStatus: withSearch.status,
+        searchText: extract(withSearch.raw).slice(0, 400),
+        searchRawStart: withSearch.raw.slice(0, 300),
+        plainStatus: noSearch.status,
+        plainText: extract(noSearch.raw).slice(0, 200),
+      });
+    }
     const out = await call({ contents: [{ parts: [{ text: "Say OK" }] }] });
     return res.status(200).json({ keyFound: key.length > 0, googleStatus: out.status });
   }
