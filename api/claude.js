@@ -23,38 +23,47 @@ export default async function handler(req, res) {
         .join("");
     } catch (e) { return ""; }
   };
+  const fetchHeadlines = async (ticker) => {
+    try {
+      const url =
+        "https://news.google.com/rss/search?q=" +
+        encodeURIComponent('"' + ticker + '" stock') +
+        "&hl=en-CA&gl=CA&ceid=CA:en";
+      const r = await fetch(url);
+      const xml = await r.text();
+      const items = [];
+      const re = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g;
+      let m;
+      while ((m = re.exec(xml)) && items.length < 6) {
+        const title = m[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+        items.push("- (" + m[2].trim() + ") " + title);
+      }
+      return items;
+    } catch (e) { return []; }
+  };
   if (req.method === "GET") {
-    const t = (req.query && req.query.brief) || "";
-    if (t) {
-      const q = { contents: [{ parts: [{ text: "Search for recent news about " + t + " stock and summarize the top 2 stories in one sentence each." }] }] };
-      const withSearch = await call({ ...q, tools: [{ google_search: {} }] });
-      const noSearch = await call(q);
-      return res.status(200).json({
-        searchStatus: withSearch.status,
-        searchText: extract(withSearch.raw).slice(0, 400),
-        searchRawStart: withSearch.raw.slice(0, 300),
-        plainStatus: noSearch.status,
-        plainText: extract(noSearch.raw).slice(0, 200),
-      });
-    }
     const out = await call({ contents: [{ parts: [{ text: "Say OK" }] }] });
     return res.status(200).json({ keyFound: key.length > 0, googleStatus: out.status });
   }
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
     const body = req.body || {};
-    const userText =
+    let userText =
       (body.messages && body.messages[0] && body.messages[0].content) || "";
-    const wantsSearch = Array.isArray(body.tools) && body.tools.length > 0;
-    const contents = [{ parts: [{ text: userText }] }];
-    let out = wantsSearch
-      ? await call({ contents, tools: [{ google_search: {} }] })
-      : await call({ contents });
-    let text = extract(out.raw);
-    if ((!text || out.status !== 200) && wantsSearch) {
-      out = await call({ contents });
-      text = extract(out.raw);
+    const wantsNews = Array.isArray(body.tools) && body.tools.length > 0;
+    if (wantsNews) {
+      const tm = userText.match(/ticker\s+([A-Za-z0-9.\-]+)/);
+      const ticker = tm ? tm[1] : "";
+      const heads = ticker ? await fetchHeadlines(ticker) : [];
+      if (heads.length === 0) {
+        return res.status(500).json({ error: "No coverage found" });
+      }
+      userText +=
+        "\n\nIMPORTANT: Base your items ONLY on these real recent headlines (dates included). Do not invent stories or use older knowledge:\n" +
+        heads.join("\n");
     }
+    const out = await call({ contents: [{ parts: [{ text: userText }] }] });
+    let text = extract(out.raw);
     if (text) {
       const s = text.indexOf("{");
       const e2 = text.lastIndexOf("}");
