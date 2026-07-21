@@ -634,7 +634,7 @@ export default function FrontierApp() {
       longOnly,
     };
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -658,7 +658,7 @@ export default function FrontierApp() {
     if (!isPro) { setShowPaywall(true); return; }
     setBriefTicker(ticker); setBriefData(null); setBriefErr(null); setBriefLoading(true);
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
