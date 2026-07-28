@@ -1179,7 +1179,7 @@ export default function FrontierApp() {
             right={
               <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}>Start $<Field value={mcStart} onChange={setMcStart} w={72} /></label>
-                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}>Years<Field value={mcYears} onChange={(v) => setMcYears(Math.max(1, Math.min(40, Math.round(v))))} w={44} /></label>
+                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}>Years<Field value={mcYears} onChange={(v) => setMcYears(Math.max(1, Math.min(40, Math.round(v))))} w={58} /></label>
                 <Btn small onClick={() => setMcSeed(mcSeed + 1)}>Re-run</Btn>
               </div>
             }>
