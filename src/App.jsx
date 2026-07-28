@@ -190,11 +190,11 @@ const AI_PROMPT_RULES = `You are an analytical observation engine reviewing a me
 /* ═══════════════ DEFAULTS ═══════════════ */
 
 const DEFAULT_ASSETS = [
-  { name: "VST", er: 14, sigma: 38 },
-  { name: "NVDA", er: 16, sigma: 42 },
-  { name: "BN.TO", er: 12, sigma: 28 },
-  { name: "MEQ.TO", er: 10, sigma: 24 },
-  { name: "ATD.TO", er: 9, sigma: 20 },
+  { name: "VST", er: 14, sigma: 38, amount: 5000 },
+  { name: "NVDA", er: 16, sigma: 42, amount: 8000 },
+  { name: "BN.TO", er: 12, sigma: 28, amount: 6000 },
+  { name: "MEQ.TO", er: 10, sigma: 24, amount: 3000 },
+  { name: "ATD.TO", er: 9, sigma: 20, amount: 3000 },
 ];
 const defaultCorr = (n) => {
   const c = [];
@@ -564,11 +564,12 @@ export default function FrontierApp() {
   const [bMonthly, setBMonthly] = useState(0);
 
   // advanced-mode state
-  const [assets, setAssets] = useState(DEFAULT_ASSETS);
+  const savedBook = (() => { try { return JSON.parse(localStorage.getItem("fx_book") || "null"); } catch (e) { return null; } })();
+  const [assets, setAssets] = useState(savedBook && savedBook.assets ? savedBook.assets : DEFAULT_ASSETS);
   const [corr, setCorr] = useState(defaultCorr(DEFAULT_ASSETS.length));
   const [rf, setRf] = useState(3.5);
   const [A, setA] = useState(4);
-  const [longOnly, setLongOnly] = useState(false);
+  const [longOnly, setLongOnly] = useState(true);
   const [scenario, setScenario] = useState("base");
   const [mcYears, setMcYears] = useState(10);
   const [mcStart, setMcStart] = useState(25000);
@@ -586,6 +587,10 @@ export default function FrontierApp() {
   const n = assets.length;
   const isPro = plan === "pro";
   const isAdv = plan !== "free"; // advanced trial or pro
+
+  React.useEffect(() => {
+    try { localStorage.setItem("fx_book", JSON.stringify({ assets, corr, rf, A, bHoldings })); } catch (e) {}
+  }, [assets, corr, rf, A, bHoldings]);
 
   /* ---- shared model runners ---- */
   const [rev, setRev] = useState(0);
@@ -611,7 +616,7 @@ export default function FrontierApp() {
     if (bad || tan.sigma <= 0) return null;
     return { tan, minv, mu, S, rfd };
   };
-  const base = useMemo(() => runModel(assets, corr, rf), [assets, corr, rf, longOnly]);
+  const base = useMemo(() => runModel(assets, corr, rf), [rev]);
   const scen = useMemo(() => {
     if (scenario === "base" || !base) return null;
     const { a, c, rf: r2 } = SCENARIOS[scenario].fn(assets, corr, rf);
@@ -637,11 +642,22 @@ export default function FrontierApp() {
   }, [base, rev]);
 
   const mc = useMemo(() => (base ? monteCarlo(base.tan.ret, base.tan.sigma, mcYears, 500, Math.max(1, mcStart)) : null),
-    [base, mcYears, mcStart, mcSeed]);
+    [base, mcSeed, rev]);
+
+  const current = useMemo(() => {
+    if (!base) return null;
+    const amts = assets.map((a) => Math.max(0, Number(a.amount) || 0));
+    const tot = amts.reduce((x, y) => x + y, 0);
+    if (tot <= 0) return null;
+    const w = amts.map((x) => x / tot);
+    const pp = portStats(w, base.mu, base.S);
+    const sh = (pp.ret - base.rfd) / pp.sigma;
+    return { w, tot, ret: pp.ret, sigma: pp.sigma, sharpe: sh, gap: base.tan.sharpe - sh };
+  }, [base, rev]);
 
   const qInsights = useMemo(
     () => (base ? quantInsights(assets, corr, { tan: base.tan }, rf / 100, A) : []),
-    [assets, corr, base, rf, A]
+    [base, rev]
   );
 
   /* ---- basic-mode derived model ---- */
@@ -688,7 +704,7 @@ export default function FrontierApp() {
   };
   const addAsset = () => {
     if (n >= 10) return;
-    setAssets([...assets, { name: `ASSET${n + 1}`, er: 8, sigma: 20 }]);
+    setAssets([...assets, { name: `ASSET${n + 1}`, er: 8, sigma: 20, amount: 1000 }]);
     const c = corr.map((r) => [...r, 0.35]);
     c.push(Array(n + 1).fill(0.35)); c[n][n] = 1;
     setCorr(c);
@@ -1074,7 +1090,7 @@ export default function FrontierApp() {
           <span style={{ color: T.ink, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{A.toFixed(1)}</span>
         </label>
         <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, color: T.sub }}>
-          <input type="checkbox" checked={longOnly} onChange={(e) => { if (!isPro) { setShowPaywall(true); return; } setLongOnly(e.target.checked); }} />
+          <input type="checkbox" checked={longOnly} onChange={(e) => { setLongOnly(e.target.checked); }} />
           Long-only {!isPro && <span style={{ fontSize: 9, fontWeight: 700, color: T.green }}>PRO</span>}
         </label>
         <button onClick={applyInputs} disabled={!dirty} style={{
@@ -1131,7 +1147,7 @@ export default function FrontierApp() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 400 }}>
               <thead><tr>
-                <th style={th}>Security</th><th style={thNum}>E[r]%</th><th style={thNum}>σ%</th>
+                <th style={th}>Security</th><th style={thNum}>You hold $</th><th style={thNum}>E[r]%</th><th style={thNum}>σ%</th>
                 <th style={thNum}>Tangency</th><th style={thNum}>Min-var</th><th style={{ ...th, width: 26 }}></th>
               </tr></thead>
               <tbody>
@@ -1143,14 +1159,15 @@ export default function FrontierApp() {
                         onChange={(v) => setAsset(i, "name", v.toUpperCase())}
                         onSelect={(r) => setAssets(assets.map((x, k) => (k === i ? { ...x, name: r.t, er: erFromVol(r.vol), sigma: r.vol } : x)))} />
                     </td>
-                    <td style={{ ...td, textAlign: "right" }}><Field value={a.er} onChange={(v) => setAsset(i, "er", v)} w={50} /></td>
+                    <td style={{ ...td, textAlign: "right" }}><Field value={a.amount == null ? 0 : a.amount} onChange={(v) => setAsset(i, "amount", v)} w={72} /></td>
+<td style={{ ...td, textAlign: "right" }}><Field value={a.er} onChange={(v) => setAsset(i, "er", v)} w={50} /></td>
                     <td style={{ ...td, textAlign: "right" }}><Field value={a.sigma} onChange={(v) => setAsset(i, "sigma", v)} w={50} /></td>
                     <td style={{ ...numTd(base ? base.tan.w[i] : 0), fontWeight: 700 }}>{base ? pct(base.tan.w[i]) : "—"}</td>
                     <td style={numTd(base ? base.minv.w[i] : 0)}>{base ? pct(base.minv.w[i]) : "—"}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <span onClick={() => runBrief(a.name)} title={isPro ? "Recent coverage" : "Pro feature"}
                         style={{ cursor: "pointer", color: T.steel, fontSize: 11, fontWeight: 700, marginRight: 10 }}>NEWS</span>
-                      <span onClick={() => removeAsset(i)} style={{ cursor: "pointer", color: T.faint }}>✕</span>
+                      <span onClick={() => { if (window.confirm('Remove this holding?')) removeAsset(i); }} style={{ cursor: "pointer", color: T.faint }}>✕</span>
                     </td>
                   </tr>
                 ))}
@@ -1190,6 +1207,26 @@ export default function FrontierApp() {
               </div>
             ))}
           </div>
+
+          <Panel title="Your portfolio vs the optimum">
+            {!current ? (<div style={{ fontSize: 12.5, color: T.faint }}>Enter dollar amounts in the You hold $ column above to compare your actual portfolio against the optimum.</div>) : (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", border: `1px solid ${T.rule}` }}>
+                  {[{ l: "Expected return", a: pct(current.ret), b: pct(base.tan.ret) }, { l: "Volatility", a: pct(current.sigma), b: pct(base.tan.sigma) }, { l: "Sharpe ratio", a: num(current.sharpe), b: num(base.tan.sharpe) }].map((k, i) => (
+                    <div key={i} style={{ padding: "12px 14px", borderRight: i < 2 ? `1px solid ${T.rule}` : "none" }}>
+                      <div style={{ ...label, fontSize: 9, marginBottom: 6 }}>{k.l}</div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ fontFamily: T.mono, fontSize: 16, color: T.sub }}>{k.a}</span>
+                        <span style={{ color: T.faint }}>to</span>
+                        <span style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 700, color: T.green }}>{k.b}</span>
+                      </div>
+                    </div>))}
+                </div>
+                <div style={{ background: T.band, border: `1px solid ${T.rule}`, borderLeft: `3px solid ${T.green}`, padding: "10px 14px", marginTop: 12, fontSize: 12.5, color: T.ink }}>
+                  Your {money(current.tot)} portfolio scores a Sharpe of {num(current.sharpe)} against the model optimum of {num(base.tan.sharpe)}.
+                </div>
+              </div>)}
+          </Panel>
 
           <Panel title="Solved allocation">
             <Hint>The mix with the best return-per-unit-of-risk given your inputs above. Change an input and these update instantly.</Hint>
@@ -1352,7 +1389,7 @@ export default function FrontierApp() {
             <div style={{ background: T.paper, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 14, fontSize: 11.5, color: T.sub, lineHeight: 1.55 }}>
               <b style={{ color: T.ink }}>Descriptive only.</b> These are machine-generated observations about the model's inputs and outputs — labeled as strengths, considerations, or flags. They are screened by an advice-language filter before display, contain no recommendations, and are not investment advice. Company characteristics beyond the numbers you entered may be imprecise; verify independently.
             </div>
-            {aiError && <div style={{ fontSize: 13, color: T.red }}>{aiError}</div>}
+            {aiError && <div style={{ fontSize: 13, color: T.red }}>{aiError} <span onClick={runAiInsights} style={{ color: T.green, fontWeight: 700, cursor: 'pointer', marginLeft: 6 }}>Try again</span></div>}
             {!aiItems && !aiLoading && !aiError && (
               <div style={{ fontSize: 13, color: T.faint, lineHeight: 1.6 }}>
                 Generates observations specific to the securities entered: structural strengths visible in the data, model sensitivities, and risk patterns such as likely shared factor exposures.
