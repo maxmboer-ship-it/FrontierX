@@ -434,6 +434,13 @@ function Btn({ children, onClick, primary, small, wide }) {
     }}>{children}</button>
   );
 }
+function Hint({ children }) {
+  return (
+    <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 12, paddingLeft: 10, borderLeft: `2px solid ${T.ruleDark}` }}>
+      {children}
+    </div>
+  );
+}
 function Panel({ title, right, children, band }) {
   return (
     <div style={{ background: band ? T.band : T.paper, border: `1px solid ${T.rule}`, borderTop: `3px solid ${T.green}`, marginBottom: 16 }}>
@@ -1073,12 +1080,21 @@ export default function FrontierApp() {
         </div>
       )}
 
+      <div style={{ background: T.band, border: `1px solid ${T.rule}`, borderLeft: `3px solid ${T.green}`, padding: "12px 16px", marginBottom: 16 }}>
+        <div style={{ ...label, color: T.green, marginBottom: 6 }}>Three steps</div>
+        <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.7 }}>
+          <b style={{ color: T.ink }}>1.</b> Add your holdings below and press <b style={{ color: T.ink }}>Fetch real σ &amp; ρ</b> to pull live risk data. &nbsp;
+          <b style={{ color: T.ink }}>2.</b> Set the yearly return you expect for each one in the <b style={{ color: T.ink }}>E[r]</b> column — that part is your call, not data. &nbsp;
+          <b style={{ color: T.ink }}>3.</b> Read the solved allocation and the checks underneath it. New to this? The <b style={{ color: T.ink }}>Basic</b> tab does the same thing in plain language.
+        </div>
+      </div>
       <Panel title="Capital market assumptions & solved weights"
         right={
           n >= 10
             ? <span style={{ fontSize: 11.5, color: T.faint }}>10 asset maximum</span>
             : <span style={{ display: "flex", gap: 8 }}><Btn small primary onClick={fetchMarketData}>{mktLoading ? "Fetching…" : "Fetch real σ & ρ"}</Btn><Btn small onClick={addAsset}>+ Add asset</Btn></span>
         }>
+            <Hint>Enter what you own. Type any ticker or company name and pick it from the list. <b>E[r]</b> is the yearly return you expect (your judgment). <b>σ</b> is how much it swings. Press <b>Fetch real σ &amp; ρ</b> to pull both volatility and correlations from a year of real prices.</Hint>
         {mktNote && (
           <div style={{ background: T.band, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: T.sub }}>{mktNote}</div>
         )}
@@ -1152,6 +1168,7 @@ export default function FrontierApp() {
           </div>
 
           <Panel title="Solved allocation">
+            <Hint>The mix with the best return-per-unit-of-risk given your inputs above. Change an input and these update instantly.</Hint>
             <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 14 }}>
               Maximum-Sharpe (tangency) weights from your assumptions, shown against a portfolio value of {money(Math.max(1, mcStart))} — change that figure in the Monte Carlo panel below.
             </div>
@@ -1180,6 +1197,7 @@ export default function FrontierApp() {
           </Panel>
 
           <Panel title="Efficient frontier · Capital allocation line">
+            <Hint>Every dot is a possible portfolio: risk across the bottom, expected return up the side. The curve is the best return available at each level of risk.</Hint>
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart margin={{ top: 8, right: 16, bottom: 6, left: -6 }}>
                 <CartesianGrid stroke={T.rule} />
@@ -1211,6 +1229,7 @@ export default function FrontierApp() {
                 <Btn small onClick={() => setMcSeed(mcSeed + 1)}>Re-run</Btn>
               </div>
             }>
+            <Hint>Runs 500 possible futures for this portfolio. The middle line is the typical outcome; the shaded band is the likely range. Not a prediction, a range.</Hint>
             {mc && (
               <>
                 <ResponsiveContainer width="100%" height={270}>
@@ -1251,6 +1270,7 @@ export default function FrontierApp() {
 
           <Panel title={`Correlation lab${!isPro ? " · Pro" : ""}`}
             right={!isPro && <Btn small primary onClick={() => setShowPaywall(true)}>Unlock</Btn>}>
+            <Hint>How much these holdings move together. 1.00 means they move in lockstep, 0 means unrelated, negative means they zig when the other zags. Lower numbers across the board mean better diversification.</Hint>
             {isPro ? (
               <div style={{ overflowX: "auto" }}>
                 <table style={{ borderCollapse: "collapse" }}>
@@ -1282,6 +1302,7 @@ export default function FrontierApp() {
           </Panel>
 
           <Panel title="Quantitative diagnostics">
+            <Hint>Automatic checks on the result: how concentrated it is, how much diversification you are actually getting, and how bad a rough year could look.</Hint>
             {qInsights.map((q, i) => (
               <div key={i} style={{ display: "flex", gap: 14, marginBottom: 10, paddingBottom: 10, borderBottom: i < qInsights.length - 1 ? `1px solid ${T.rule}` : "none" }}>
                 <span style={{ ...label, fontSize: 9, minWidth: 100, paddingTop: 2, color: T.green }}>{q.tag}</span>
@@ -1292,6 +1313,7 @@ export default function FrontierApp() {
 
           {/* AI OBSERVATIONS — safeguarded */}
           <Panel title={`Security news briefs${!isPro ? " · Pro" : ""}`}>
+            <Hint>Recent headlines for each holding, with links to the full articles.</Hint>
             <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10 }}>Recent factual coverage for any holding — descriptive only:</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {assets.map((a, i) => (
@@ -1302,6 +1324,7 @@ export default function FrontierApp() {
 
           <Panel title={`AI observations${!isPro ? " · Pro" : ""}`}
             right={<Btn small primary onClick={runAiInsights}>{aiLoading ? "Analyzing…" : isPro ? "Generate" : "Unlock"}</Btn>} band>
+            <Hint>Machine-written notes on what stands out in your inputs and results.</Hint>
             <div style={{ background: T.paper, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 14, fontSize: 11.5, color: T.sub, lineHeight: 1.55 }}>
               <b style={{ color: T.ink }}>Descriptive only.</b> These are machine-generated observations about the model's inputs and outputs — labeled as strengths, considerations, or flags. They are screened by an advice-language filter before display, contain no recommendations, and are not investment advice. Company characteristics beyond the numbers you entered may be imprecise; verify independently.
             </div>
