@@ -1123,6 +1123,34 @@ export default function FrontierApp() {
             ))}
           </div>
 
+          <Panel title="Solved allocation">
+            <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 14 }}>
+              Maximum-Sharpe (tangency) weights from your assumptions, shown against a portfolio value of {money(Math.max(1, mcStart))} — change that figure in the Monte Carlo panel below.
+            </div>
+            {assets.map((a, i) => {
+              const w = base.tan.w[i];
+              const maxW = Math.max.apply(null, base.tan.w.map(function (x) { return Math.abs(x); }));
+              const barW = maxW > 0 ? (Math.abs(w) / maxW) * 100 : 0;
+              return (
+                <div key={i} style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: T.ink }}>{a.name}</span>
+                    <span>
+                      <span style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 700, color: w < 0 ? T.red : T.green }}>{pct(w)}</span>
+                      <span style={{ fontFamily: T.mono, fontSize: 13, color: T.sub, marginLeft: 10 }}>{money(w * Math.max(1, mcStart))}</span>
+                    </span>
+                  </div>
+                  <div style={{ height: 14, background: T.surface, border: `1px solid ${T.rule}` }}>
+                    <div style={{ width: barW + "%", height: "100%", background: w < 0 ? T.red : PALETTE[i % PALETTE.length] }} />
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 11, color: T.faint, marginTop: 4 }}>
+              Negative weights shown in red are short positions, which the long-only constraint removes.
+            </div>
+          </Panel>
+
           <Panel title="Efficient frontier · Capital allocation line">
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart margin={{ top: 8, right: 16, bottom: 6, left: -6 }}>
