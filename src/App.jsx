@@ -515,6 +515,13 @@ export default function FrontierApp() {
   const [mode, setMode] = useState("basic"); // basic | advanced
   const [plan, setPlanRaw] = useState(() => { try { return localStorage.getItem("fx_plan") || "free"; } catch (e) { return "free"; } });
   const setPlan = (p) => { setPlanRaw(p); try { localStorage.setItem("fx_plan", p); } catch (e) {} };
+  React.useEffect(() => {
+    try {
+      const FRIEND_KEYS = ["FX-A7K2","FX-B4M9","FX-C1R6","FX-D8T3","FX-E5W7","FX-F2N4","FX-G9J1","FX-H6P8","FX-J3L5","FX-K7Q2"];
+      const k = new URLSearchParams(window.location.search).get("key");
+      if (k && FRIEND_KEYS.indexOf(k.toUpperCase()) >= 0) setPlan("pro");
+    } catch (e) {}
+  }, []);
   const [mktLoading, setMktLoading] = useState(false);
   const [mktNote, setMktNote] = useState(null);
   const fetchMarketData = async () => {
