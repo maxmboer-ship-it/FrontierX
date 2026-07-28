@@ -588,6 +588,13 @@ export default function FrontierApp() {
   const isAdv = plan !== "free"; // advanced trial or pro
 
   /* ---- shared model runners ---- */
+  const [rev, setRev] = useState(0);
+  const inputSnap = JSON.stringify([assets, corr, rf, A, longOnly, mcYears, mcStart]);
+  const [appliedSnap, setAppliedSnap] = useState(inputSnap);
+  const dirty = inputSnap !== appliedSnap;
+  const applyInputs = () => setRev((r) => r + 1);
+  React.useEffect(() => { setAppliedSnap(inputSnap); }, [rev]);
+
   const runModel = (aRaw, c, rfPct) => {
     // sanitize: volatility floor of 1% prevents singular covariance from zero-vol input
     const a = aRaw.map((x) => ({ ...x, sigma: Math.max(1, Math.abs(x.sigma) || 1) }));
@@ -609,7 +616,7 @@ export default function FrontierApp() {
     if (scenario === "base" || !base) return null;
     const { a, c, rf: r2 } = SCENARIOS[scenario].fn(assets, corr, rf);
     return runModel(a, c, r2);
-  }, [scenario, assets, corr, rf, longOnly, base]);
+  }, [scenario, base, rev]);
 
   const chart = useMemo(() => {
     if (!base) return null;
@@ -627,7 +634,7 @@ export default function FrontierApp() {
     const yStar = (tan.ret - rfd) / (A * tan.sigma * tan.sigma);
     const yC = Math.max(0, Math.min(yStar, 2));
     return { frontier, cal, yStar, complete: { ret: rfd + yC * (tan.ret - rfd), sigma: yC * tan.sigma }, assetPts: assets.map((a) => ({ x: a.sigma, y: a.er, name: a.name })) };
-  }, [base, assets, rf, A, longOnly]);
+  }, [base, rev]);
 
   const mc = useMemo(() => (base ? monteCarlo(base.tan.ret, base.tan.sigma, mcYears, 500, Math.max(1, mcStart)) : null),
     [base, mcYears, mcStart, mcSeed]);
@@ -1070,6 +1077,13 @@ export default function FrontierApp() {
           <input type="checkbox" checked={longOnly} onChange={(e) => { if (!isPro) { setShowPaywall(true); return; } setLongOnly(e.target.checked); }} />
           Long-only {!isPro && <span style={{ fontSize: 9, fontWeight: 700, color: T.green }}>PRO</span>}
         </label>
+        <button onClick={applyInputs} disabled={!dirty} style={{
+          fontFamily: T.ui, fontSize: 12.5, fontWeight: 700, padding: "7px 16px", borderRadius: 3,
+          cursor: dirty ? "pointer" : "default",
+          border: `1.5px solid ${dirty ? T.green : T.rule}`,
+          background: dirty ? T.green : "transparent",
+          color: dirty ? "#07130E" : T.faint,
+        }}>{dirty ? "Update model ↻" : "Up to date"}</button>
         <div style={{ display: "flex", gap: 0, marginLeft: "auto", border: `1px solid ${T.ruleDark}` }}>
           {Object.entries(SCENARIOS).map(([k, s]) => (
             <button key={k}
