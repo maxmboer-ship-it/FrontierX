@@ -1284,9 +1284,9 @@ export default function FrontierApp() {
 
           <Panel title="Monte Carlo wealth simulation · 500 paths"
             right={
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}>Start $<Field value={mcStart} onChange={setMcStart} w={72} /></label>
-                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}>Years<Field value={mcYears} onChange={(v) => setMcYears(Math.max(1, Math.min(40, Math.round(v))))} w={58} /></label>
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}><span style={{ minWidth: 52 }}>Start $</span><Field value={mcStart} onChange={setMcStart} w={84} /></label>
+                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}><span style={{ minWidth: 38 }}>Years</span><Field value={mcYears} onChange={(v) => setMcYears(Math.max(1, Math.min(40, Math.round(v))))} w={84} /></label>
                 <Btn small onClick={() => setMcSeed(mcSeed + 1)}>Re-run</Btn>
               </div>
             }>
