@@ -1,9 +1,6 @@
 export default async function handler(req, res) {
-  try {
-    return await main(req, res);
-  } catch (e) {
-    return res.status(200).json({ crashed: true, message: String(e && e.message) });
-  }
+  try { return await main(req, res); }
+  catch (e) { return res.status(200).json({ crashed: true, message: String(e && e.message) }); }
 }
 async function main(req, res) {
   const key = process.env.GEMINI_API_KEY || "";
@@ -45,16 +42,14 @@ async function main(req, res) {
       const ts = res0.timestamp || [];
       const cl = res0.indicators.quote[0].close || [];
       const map = {};
-      for (let i = 0; i < ts.length; i++) {
-        if (cl[i] != null) map[Math.floor(ts[i] / 604800)] = cl[i];
-      }
+      for (let i = 0; i < ts.length; i++) if (cl[i] != null) map[Math.floor(ts[i] / 604800)] = cl[i];
       return Object.keys(map).length ? map : null;
     } catch (e) { return null; }
   };
-  const stdev = (arr) => {
+  const stats = (arr) => {
     const m = arr.reduce((a, b) => a + b, 0) / arr.length;
     const v = arr.reduce((a, b) => a + (b - m) * (b - m), 0) / (arr.length - 1);
-    return { mean: m, sd: Math.sqrt(v) };
+    return { mean: m, sd: Math.sqrt(v), varr: v };
   };
   const clean = (s) =>
     s.replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&")
@@ -95,26 +90,41 @@ async function main(req, res) {
     const csv = getParam("corr");
     if (csv) {
       const syms = csv.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10);
+      const BENCH = "SPY";
       const maps = [];
       for (const s of syms) maps.push(await weeklyCloses(s));
+      const bench = await weeklyCloses(BENCH);
       const ok = maps.map((m) => m != null);
-      const weekSets = maps.filter((m) => m).map((m) => Object.keys(m));
-      let common = weekSets.length ? weekSets[0] : [];
-      for (const ws of weekSets) common = common.filter((k) => ws.indexOf(k) >= 0);
+      const sets = maps.filter((m) => m).map((m) => Object.keys(m));
+      if (bench) sets.push(Object.keys(bench));
+      let common = sets.length ? sets[0] : [];
+      for (const ws of sets) common = common.filter((k) => ws.indexOf(k) >= 0);
       common.sort((a, b) => Number(a) - Number(b));
       if (common.length < 15) {
-        return res.status(200).json({ note: "Not enough overlapping price history.", points: common.length, vols: syms.map(() => null), corr: null });
+        return res.status(200).json({ note: "Not enough overlapping price history.", points: common.length, vols: syms.map(() => null), betas: syms.map(() => null), corr: null });
       }
-      const rets = maps.map((m) => {
+      const retsOf = (m) => {
         if (!m) return null;
         const out = [];
         for (let i = 1; i < common.length; i++) out.push(Math.log(m[common[i]] / m[common[i - 1]]));
         return out;
-      });
-      const vols = rets.map((r) => {
-        if (!r) return null;
-        return Math.max(5, Math.min(150, Math.round(stdev(r).sd * Math.sqrt(52) * 100)));
-      });
+      };
+      const rets = maps.map(retsOf);
+      const bret = retsOf(bench);
+      const vols = rets.map((r) => r ? Math.max(5, Math.min(150, Math.round(stats(r).sd * Math.sqrt(52) * 100))) : null);
+      let betas = syms.map(() => null);
+      if (bret) {
+        const sb = stats(bret);
+        betas = rets.map((r) => {
+          if (!r) return null;
+          const sa = stats(r);
+          let cov = 0;
+          for (let k = 0; k < r.length; k++) cov += (r[k] - sa.mean) * (bret[k] - sb.mean);
+          cov /= (r.length - 1);
+          const b = cov / sb.varr;
+          return isFinite(b) ? Math.round(Math.max(-1, Math.min(4, b)) * 100) / 100 : null;
+        });
+      }
       const n = syms.length;
       const corr = [];
       for (let i = 0; i < n; i++) {
@@ -123,17 +133,17 @@ async function main(req, res) {
           if (i === j) { corr[i].push(1); continue; }
           if (!rets[i] || !rets[j]) { corr[i].push(null); continue; }
           const a = rets[i], b = rets[j];
-          const sa = stdev(a), sb = stdev(b);
+          const sa = stats(a), sb2 = stats(b);
           let cov = 0;
-          for (let k = 0; k < a.length; k++) cov += (a[k] - sa.mean) * (b[k] - sb.mean);
+          for (let k = 0; k < a.length; k++) cov += (a[k] - sa.mean) * (b[k] - sb2.mean);
           cov /= (a.length - 1);
-          const c = cov / (sa.sd * sb.sd);
+          const c = cov / (sa.sd * sb2.sd);
           corr[i].push(isFinite(c) ? Math.max(-0.99, Math.min(0.99, c)) : null);
         }
       }
       return res.status(200).json({
-        points: common.length - 1,
-        vols, corr,
+        points: common.length - 1, vols, betas, corr,
+        benchmark: BENCH,
         missing: syms.filter((s, i) => !ok[i]),
       });
     }
@@ -164,8 +174,7 @@ async function main(req, res) {
       if (keys.length < 10) return res.status(200).json({ vol: null });
       const r2 = [];
       for (let i = 1; i < keys.length; i++) r2.push(Math.log(m[keys[i]] / m[keys[i - 1]]));
-      const sd = stdev(r2).sd;
-      return res.status(200).json({ vol: Math.max(5, Math.min(150, Math.round(sd * Math.sqrt(52) * 100))) });
+      return res.status(200).json({ vol: Math.max(5, Math.min(150, Math.round(stats(r2).sd * Math.sqrt(52) * 100))) });
     }
     const out = await call({ contents: [{ parts: [{ text: "Say OK" }] }] });
     return res.status(200).json({ keyFound: key.length > 0, googleStatus: out.status });

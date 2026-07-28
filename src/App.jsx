@@ -522,7 +522,13 @@ export default function FrontierApp() {
       const syms = assets.map((a) => a.name).join(",");
       const r = await fetch("/api/claude?corr=" + encodeURIComponent(syms));
       const d = await r.json();
-      if (d.vols) setAssets(assets.map((a, i) => (d.vols[i] ? { ...a, sigma: d.vols[i] } : a)));
+      const MRP = 5.5;
+      if (d.vols || d.betas) setAssets(assets.map((a, i) => {
+        const next = { ...a };
+        if (d.vols && d.vols[i]) next.sigma = d.vols[i];
+        if (d.betas && typeof d.betas[i] === "number") next.er = Math.round((rf + d.betas[i] * MRP) * 10) / 10;
+        return next;
+      }));
       if (d.corr) {
         const c = corr.map((row) => [...row]);
         for (let i = 0; i < assets.length; i++) {
@@ -534,7 +540,10 @@ export default function FrontierApp() {
         setCorr(c);
       }
       const miss = (d.missing && d.missing.length) ? " No data for: " + d.missing.join(", ") + "." : "";
-      setMktNote(d.note ? d.note : "Volatilities and correlations computed from " + (d.points || 0) + " weekly observations." + miss);
+      const bl = (d.betas && d.betas.some((b) => typeof b === "number"))
+        ? " Betas vs " + (d.benchmark || "SPY") + ": " + assets.map((a, i) => a.name + " " + (d.betas[i] != null ? d.betas[i].toFixed(2) : "n/a")).join(", ") + "."
+        : "";
+      setMktNote(d.note ? d.note : "σ, ρ and β computed from " + (d.points || 0) + " weekly observations. E[r] set by CAPM: rf + β × 5.5% market risk premium." + bl + miss);
     } catch (e) {
       setMktNote("Couldn't reach market data.");
     } finally { setMktLoading(false); }
@@ -1084,7 +1093,7 @@ export default function FrontierApp() {
         <div style={{ ...label, color: T.green, marginBottom: 6 }}>Three steps</div>
         <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.7 }}>
           <b style={{ color: T.ink }}>1.</b> Add your holdings below and press <b style={{ color: T.ink }}>Fetch real σ &amp; ρ</b> to pull live risk data. &nbsp;
-          <b style={{ color: T.ink }}>2.</b> Set the yearly return you expect for each one in the <b style={{ color: T.ink }}>E[r]</b> column — that part is your call, not data. &nbsp;
+          <b style={{ color: T.ink }}>2.</b> Review the <b style={{ color: T.ink }}>E[r]</b> figures CAPM produced and override any you disagree with. &nbsp;
           <b style={{ color: T.ink }}>3.</b> Read the solved allocation and the checks underneath it. New to this? The <b style={{ color: T.ink }}>Basic</b> tab does the same thing in plain language.
         </div>
       </div>
@@ -1092,9 +1101,9 @@ export default function FrontierApp() {
         right={
           n >= 10
             ? <span style={{ fontSize: 11.5, color: T.faint }}>10 asset maximum</span>
-            : <span style={{ display: "flex", gap: 8 }}><Btn small primary onClick={fetchMarketData}>{mktLoading ? "Fetching…" : "Fetch real σ & ρ"}</Btn><Btn small onClick={addAsset}>+ Add asset</Btn></span>
+            : <span style={{ display: "flex", gap: 8 }}><Btn small primary onClick={fetchMarketData}>{mktLoading ? "Fetching…" : "Fetch market data"}</Btn><Btn small onClick={addAsset}>+ Add asset</Btn></span>
         }>
-            <Hint>Enter what you own. Type any ticker or company name and pick it from the list. <b>E[r]</b> is the yearly return you expect (your judgment). <b>σ</b> is how much it swings. Press <b>Fetch real σ &amp; ρ</b> to pull both volatility and correlations from a year of real prices.</Hint>
+            <Hint>Enter what you own. Type any ticker or company name and pick it from the list. <b>E[r]</b> is the expected yearly return, <b>σ</b> is how much it swings. Press <b>Fetch market data</b> to compute all three inputs from a year of real prices: σ and correlations directly, and E[r] via CAPM (risk-free rate + beta × 5.5% market premium). Every figure stays editable if you disagree with it.</Hint>
         {mktNote && (
           <div style={{ background: T.band, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: T.sub }}>{mktNote}</div>
         )}
