@@ -8,10 +8,8 @@ export default async function handler(req, res) {
 async function main(req, res) {
   const key = process.env.GEMINI_API_KEY || "";
   const getParam = (name) => {
-    try {
-      const u = new URL(req.url, "http://x");
-      return u.searchParams.get(name) || "";
-    } catch (e) { return ""; }
+    try { return new URL(req.url, "http://x").searchParams.get(name) || ""; }
+    catch (e) { return ""; }
   };
   const tfetch = async (url, opts, ms) => {
     const c = new AbortController();
@@ -21,31 +19,42 @@ async function main(req, res) {
       const raw = await r.text();
       clearTimeout(t);
       return { status: r.status, raw };
-    } catch (e) {
-      clearTimeout(t);
-      return { status: 0, raw: "" };
-    }
+    } catch (e) { clearTimeout(t); return { status: 0, raw: "" }; }
   };
   const call = (payload) =>
     tfetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify(payload),
-      },
+      { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(payload) },
       20000
     );
   const extract = (raw) => {
     try {
       const data = JSON.parse(raw);
-      return ((data.candidates &&
-        data.candidates[0] &&
-        data.candidates[0].content &&
-        data.candidates[0].content.parts) || [])
-        .map((p) => p.text || "")
-        .join("");
+      return ((data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [])
+        .map((p) => p.text || "").join("");
     } catch (e) { return ""; }
+  };
+  const weeklyCloses = async (sym) => {
+    const r = await tfetch(
+      "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1y&interval=1wk",
+      { headers: { "user-agent": "Mozilla/5.0" } }, 7000
+    );
+    try {
+      const d = JSON.parse(r.raw);
+      const res0 = d.chart.result[0];
+      const ts = res0.timestamp || [];
+      const cl = res0.indicators.quote[0].close || [];
+      const map = {};
+      for (let i = 0; i < ts.length; i++) {
+        if (cl[i] != null) map[Math.floor(ts[i] / 604800)] = cl[i];
+      }
+      return Object.keys(map).length ? map : null;
+    } catch (e) { return null; }
+  };
+  const stdev = (arr) => {
+    const m = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const v = arr.reduce((a, b) => a + (b - m) * (b - m), 0) / (arr.length - 1);
+    return { mean: m, sd: Math.sqrt(v) };
   };
   const clean = (s) =>
     s.replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&")
@@ -83,6 +92,51 @@ async function main(req, res) {
     return [];
   };
   if (req.method === "GET") {
+    const csv = getParam("corr");
+    if (csv) {
+      const syms = csv.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10);
+      const maps = [];
+      for (const s of syms) maps.push(await weeklyCloses(s));
+      const ok = maps.map((m) => m != null);
+      const weekSets = maps.filter((m) => m).map((m) => Object.keys(m));
+      let common = weekSets.length ? weekSets[0] : [];
+      for (const ws of weekSets) common = common.filter((k) => ws.indexOf(k) >= 0);
+      common.sort((a, b) => Number(a) - Number(b));
+      if (common.length < 15) {
+        return res.status(200).json({ note: "Not enough overlapping price history.", points: common.length, vols: syms.map(() => null), corr: null });
+      }
+      const rets = maps.map((m) => {
+        if (!m) return null;
+        const out = [];
+        for (let i = 1; i < common.length; i++) out.push(Math.log(m[common[i]] / m[common[i - 1]]));
+        return out;
+      });
+      const vols = rets.map((r) => {
+        if (!r) return null;
+        return Math.max(5, Math.min(150, Math.round(stdev(r).sd * Math.sqrt(52) * 100)));
+      });
+      const n = syms.length;
+      const corr = [];
+      for (let i = 0; i < n; i++) {
+        corr.push([]);
+        for (let j = 0; j < n; j++) {
+          if (i === j) { corr[i].push(1); continue; }
+          if (!rets[i] || !rets[j]) { corr[i].push(null); continue; }
+          const a = rets[i], b = rets[j];
+          const sa = stdev(a), sb = stdev(b);
+          let cov = 0;
+          for (let k = 0; k < a.length; k++) cov += (a[k] - sa.mean) * (b[k] - sb.mean);
+          cov /= (a.length - 1);
+          const c = cov / (sa.sd * sb.sd);
+          corr[i].push(isFinite(c) ? Math.max(-0.99, Math.min(0.99, c)) : null);
+        }
+      }
+      return res.status(200).json({
+        points: common.length - 1,
+        vols, corr,
+        missing: syms.filter((s, i) => !ok[i]),
+      });
+    }
     const q = getParam("search");
     if (q) {
       const r = await tfetch(
@@ -100,37 +154,25 @@ async function main(req, res) {
             vol: null,
           }));
         return res.status(200).json({ results: out });
-      } catch (e) {
-        return res.status(200).json({ results: [], note: "yahoo status " + r.status });
-      }
+      } catch (e) { return res.status(200).json({ results: [] }); }
     }
     const v = getParam("vol");
     if (v) {
-      const r = await tfetch(
-        "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(v) + "?range=1y&interval=1wk",
-        { headers: { "user-agent": "Mozilla/5.0" } }, 6000
-      );
-      try {
-        const data = JSON.parse(r.raw);
-        const closes = data.chart.result[0].indicators.quote[0].close.filter((x) => x != null);
-        if (closes.length < 10) throw new Error("thin");
-        const rets = [];
-        for (let i = 1; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
-        const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
-        const varr = rets.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (rets.length - 1);
-        const volPct = Math.round(Math.sqrt(varr) * Math.sqrt(52) * 100);
-        return res.status(200).json({ vol: Math.max(5, Math.min(150, volPct)) });
-      } catch (e) {
-        return res.status(200).json({ vol: null });
-      }
+      const m = await weeklyCloses(v);
+      if (!m) return res.status(200).json({ vol: null });
+      const keys = Object.keys(m).sort((a, b) => Number(a) - Number(b));
+      if (keys.length < 10) return res.status(200).json({ vol: null });
+      const r2 = [];
+      for (let i = 1; i < keys.length; i++) r2.push(Math.log(m[keys[i]] / m[keys[i - 1]]));
+      const sd = stdev(r2).sd;
+      return res.status(200).json({ vol: Math.max(5, Math.min(150, Math.round(sd * Math.sqrt(52) * 100))) });
     }
     const out = await call({ contents: [{ parts: [{ text: "Say OK" }] }] });
     return res.status(200).json({ keyFound: key.length > 0, googleStatus: out.status });
   }
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const body = req.body || {};
-  const userText =
-    (body.messages && body.messages[0] && body.messages[0].content) || "";
+  const userText = (body.messages && body.messages[0] && body.messages[0].content) || "";
   const wantsNews = Array.isArray(body.tools) && body.tools.length > 0;
   if (wantsNews) {
     const tm = userText.match(/ticker\s+([A-Za-z0-9.\-]+)/);

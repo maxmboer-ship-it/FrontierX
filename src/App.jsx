@@ -507,6 +507,31 @@ export default function FrontierApp() {
   const [mode, setMode] = useState("basic"); // basic | advanced
   const [plan, setPlanRaw] = useState(() => { try { return localStorage.getItem("fx_plan") || "free"; } catch (e) { return "free"; } });
   const setPlan = (p) => { setPlanRaw(p); try { localStorage.setItem("fx_plan", p); } catch (e) {} };
+  const [mktLoading, setMktLoading] = useState(false);
+  const [mktNote, setMktNote] = useState(null);
+  const fetchMarketData = async () => {
+    setMktLoading(true); setMktNote(null);
+    try {
+      const syms = assets.map((a) => a.name).join(",");
+      const r = await fetch("/api/claude?corr=" + encodeURIComponent(syms));
+      const d = await r.json();
+      if (d.vols) setAssets(assets.map((a, i) => (d.vols[i] ? { ...a, sigma: d.vols[i] } : a)));
+      if (d.corr) {
+        const c = corr.map((row) => [...row]);
+        for (let i = 0; i < assets.length; i++) {
+          for (let j = i + 1; j < assets.length; j++) {
+            const v = d.corr[i] && d.corr[i][j];
+            if (typeof v === "number" && isFinite(v)) c[i][j] = Math.round(v * 100) / 100;
+          }
+        }
+        setCorr(c);
+      }
+      const miss = (d.missing && d.missing.length) ? " No data for: " + d.missing.join(", ") + "." : "";
+      setMktNote(d.note ? d.note : "Volatilities and correlations computed from " + (d.points || 0) + " weekly observations." + miss);
+    } catch (e) {
+      setMktNote("Couldn't reach market data.");
+    } finally { setMktLoading(false); }
+  };
   const [showPaywall, setShowPaywall] = useState(false);
   const [showCheckout, setShowCheckout] = useState(null); // "advanced" | "pro" | null
   const [ckEmail, setCkEmail] = useState("");
@@ -1052,8 +1077,11 @@ export default function FrontierApp() {
         right={
           n >= 10
             ? <span style={{ fontSize: 11.5, color: T.faint }}>10 asset maximum</span>
-            : <Btn small onClick={addAsset}>+ Add asset</Btn>
+            : <span style={{ display: "flex", gap: 8 }}><Btn small primary onClick={fetchMarketData}>{mktLoading ? "Fetching…" : "Fetch real σ & ρ"}</Btn><Btn small onClick={addAsset}>+ Add asset</Btn></span>
         }>
+        {mktNote && (
+          <div style={{ background: T.band, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: T.sub }}>{mktNote}</div>
+        )}
         {!base && (
           <div style={{ background: T.goldBg, border: `1px solid ${T.ruleDark}`, padding: "9px 12px", marginBottom: 12, fontSize: 12.5, color: T.ink }}>
             The model can't solve with these inputs. Check that every volatility is above zero and that the correlation matrix is internally consistent — extreme combinations (e.g. A–B at 0.9, A–C at 0.9, B–C at −0.9) have no valid covariance.
