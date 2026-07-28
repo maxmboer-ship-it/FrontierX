@@ -559,7 +559,7 @@ export default function FrontierApp() {
   const [trialEnds, setTrialEnds] = useState(null);
 
   // basic-mode state
-  const [bHoldings, setBHoldings] = useState(DEFAULT_BASIC);
+  const [bHoldings, setBHoldings] = useState([{ name: "", amount: 0, risk: "med" }]);
   const [bYears, setBYears] = useState(10);
   const [bMonthly, setBMonthly] = useState(0);
 
