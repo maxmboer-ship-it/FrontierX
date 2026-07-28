@@ -32,6 +32,7 @@ function solveUnconstrained(mu, S, rf) {
     const excess = mu.map((m) => m - rf);
     const tRaw = math.multiply(Sinv, excess);
     const tSum = tRaw.reduce((a, b) => a + b, 0);
+    if (!(tSum > 1e-9)) return null;
     const mRaw = math.multiply(Sinv, ones);
     const mSum = mRaw.reduce((a, b) => a + b, 0);
     return { wTan: tRaw.map((x) => x / tSum), wMin: mRaw.map((x) => x / mSum) };
@@ -78,7 +79,7 @@ function gauss() {
 }
 function monteCarloContrib(ret, sigma, years, paths, start, monthly) {
   const steps = years * 12;
-  const mMu = ret / 12 - (sigma * sigma) / 24;
+  const mMu = Math.log(1 + Math.max(-0.95, ret)) / 12 - (sigma * sigma) / 24;
   const mSig = sigma / Math.sqrt(12);
   const all = Array.from({ length: paths }, () => start);
   const yearly = [];
@@ -101,7 +102,7 @@ function monteCarloContrib(ret, sigma, years, paths, start, monthly) {
 }
 function monteCarlo(ret, sigma, years, paths, start) {
   const steps = years * 12;
-  const mMu = ret / 12 - (sigma * sigma) / 24;
+  const mMu = Math.log(1 + Math.max(-0.95, ret)) / 12 - (sigma * sigma) / 24;
   const mSig = sigma / Math.sqrt(12);
   const all = Array.from({ length: paths }, () => start);
   const yearly = [];
@@ -543,7 +544,7 @@ export default function FrontierApp() {
       const bl = (d.betas && d.betas.some((b) => typeof b === "number"))
         ? " Betas vs " + (d.benchmark || "SPY") + ": " + assets.map((a, i) => a.name + " " + (d.betas[i] != null ? d.betas[i].toFixed(2) : "n/a")).join(", ") + "."
         : "";
-      setMktNote(d.note ? d.note : "σ, ρ and β computed from " + (d.points || 0) + " weekly observations. E[r] set by CAPM: rf + β × 5.5% market risk premium." + bl + miss);
+      setMktNote(d.note ? d.note : "Dividend-adjusted, in " + (d.currency || "native currency") + ". σ, ρ and β computed from " + (d.points || 0) + " weekly observations. E[r] set by CAPM: rf + β × 5.5% market risk premium." + bl + miss);
     } catch (e) {
       setMktNote("Couldn't reach market data.");
     } finally { setMktLoading(false); }
@@ -1109,7 +1110,7 @@ export default function FrontierApp() {
         )}
         {!base && (
           <div style={{ background: T.goldBg, border: `1px solid ${T.ruleDark}`, padding: "9px 12px", marginBottom: 12, fontSize: 12.5, color: T.ink }}>
-            The model can't solve with these inputs. Check that every volatility is above zero and that the correlation matrix is internally consistent — extreme combinations (e.g. A–B at 0.9, A–C at 0.9, B–C at −0.9) have no valid covariance.
+            The model can't solve with these inputs. This usually means every expected return sits at or below the risk-free rate, so no risky portfolio beats cash. It can also mean a volatility of zero, or a correlation matrix that is internally inconsistent — extreme combinations (e.g. A–B at 0.9, A–C at 0.9, B–C at −0.9) have no valid covariance.
           </div>
         )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, alignItems: "start" }}>

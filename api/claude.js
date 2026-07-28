@@ -31,6 +31,7 @@ async function main(req, res) {
         .map((p) => p.text || "").join("");
     } catch (e) { return ""; }
   };
+  const isCad = (s) => /\.(TO|V|NE|CN)$/i.test(s);
   const weeklyCloses = async (sym) => {
     const r = await tfetch(
       "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1y&interval=1wk",
@@ -40,7 +41,9 @@ async function main(req, res) {
       const d = JSON.parse(r.raw);
       const res0 = d.chart.result[0];
       const ts = res0.timestamp || [];
-      const cl = res0.indicators.quote[0].close || [];
+      let cl = null;
+      try { cl = res0.indicators.adjclose[0].adjclose; } catch (e) { cl = null; }
+      if (!cl) cl = res0.indicators.quote[0].close || [];
       const map = {};
       for (let i = 0; i < ts.length; i++) if (cl[i] != null) map[Math.floor(ts[i] / 604800)] = cl[i];
       return Object.keys(map).length ? map : null;
@@ -90,9 +93,22 @@ async function main(req, res) {
     const csv = getParam("corr");
     if (csv) {
       const syms = csv.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10);
-      const BENCH = "SPY";
+      const anyCad = syms.some(isCad), anyUsd = syms.some((x) => !isCad(x));
+      const mixed = anyCad && anyUsd;
+      const BENCH = mixed ? "XEQT.TO" : (anyCad ? "XIC.TO" : "SPY");
       const maps = [];
       for (const s of syms) maps.push(await weeklyCloses(s));
+      let fx = null;
+      if (mixed) fx = await weeklyCloses("CAD=X");
+      if (mixed && fx) {
+        for (let i = 0; i < syms.length; i++) {
+          if (maps[i] && !isCad(syms[i])) {
+            const conv = {};
+            for (const k of Object.keys(maps[i])) if (fx[k] != null) conv[k] = maps[i][k] * fx[k];
+            maps[i] = Object.keys(conv).length ? conv : null;
+          }
+        }
+      }
       const bench = await weeklyCloses(BENCH);
       const ok = maps.map((m) => m != null);
       const sets = maps.filter((m) => m).map((m) => Object.keys(m));
@@ -144,6 +160,7 @@ async function main(req, res) {
       return res.status(200).json({
         points: common.length - 1, vols, betas, corr,
         benchmark: BENCH,
+        currency: mixed ? "CAD (USD holdings converted)" : (anyCad ? "CAD" : "USD"),
         missing: syms.filter((s, i) => !ok[i]),
       });
     }
