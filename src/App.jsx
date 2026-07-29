@@ -12,7 +12,11 @@ function buildCov(assets, corr) {
   for (let i = 0; i < n; i++) {
     S.push([]);
     for (let j = 0; j < n; j++) {
-      const rho = i === j ? 1 : corr[Math.min(i, j)][Math.max(i, j)];
+      // Defensive: a short/ragged corr row must degrade to a default, never throw.
+      // Throwing here unmounts the whole app and renders a blank page.
+      const row = corr[Math.min(i, j)];
+      const raw = row ? row[Math.max(i, j)] : undefined;
+      const rho = i === j ? 1 : (isFinite(raw) ? raw : 0.35);
       S[i].push(rho * (assets[i].sigma / 100) * (assets[j].sigma / 100));
     }
   }
@@ -200,6 +204,49 @@ const defaultCorr = (n) => {
   const c = [];
   for (let i = 0; i < n; i++) { c.push([]); for (let j = 0; j < n; j++) c[i].push(i === j ? 1 : 0.35); }
   return c;
+};
+/* Always returns a well-formed n×n matrix, preserving whatever valid values
+   `raw` had. Restored state can disagree with the asset count (e.g. a book
+   saved with 8 holdings against a 5×5 matrix), and an undersized matrix makes
+   buildCov read past the end and throw during render — which unmounts the app
+   and shows a blank page. Normalizing on load makes that unrepresentable. */
+const normalizeCorr = (raw, n) => {
+  const c = [];
+  for (let i = 0; i < n; i++) {
+    c.push([]);
+    for (let j = 0; j < n; j++) {
+      if (i === j) { c[i].push(1); continue; }
+      const v = raw && raw[i] != null ? Number(raw[i][j]) : NaN;
+      c[i].push(isFinite(v) ? Math.max(-0.99, Math.min(0.99, v)) : 0.35);
+    }
+  }
+  return c;
+};
+const sanitizeAssets = (raw) => {
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+  const out = raw.slice(0, 30).map((a, i) => {
+    const src = a && typeof a === "object" ? a : {};
+    const sigma = Number(src.sigma), er = Number(src.er), amount = Number(src.amount);
+    return {
+      name: typeof src.name === "string" && src.name ? src.name : "ASSET" + (i + 1),
+      er: isFinite(er) ? er : 8,
+      sigma: isFinite(sigma) ? Math.max(1, Math.abs(sigma)) : 20,
+      amount: isFinite(amount) ? Math.max(0, amount) : 0,
+    };
+  });
+  return out.length >= 2 ? out : null;
+};
+const sanitizeHoldings = (raw) => {
+  if (!Array.isArray(raw) || !raw.length) return null;
+  return raw.slice(0, 10).map((h, i) => {
+    const src = h && typeof h === "object" ? h : {};
+    const amount = Number(src.amount);
+    return {
+      name: typeof src.name === "string" ? src.name : "Company " + String.fromCharCode(65 + i),
+      amount: isFinite(amount) ? Math.max(0, amount) : 0,
+      risk: ["low", "med", "high"].indexOf(src.risk) >= 0 ? src.risk : "med",
+    };
+  });
 };
 // Basic mode: plain-language risk presets instead of E[r]/σ inputs
 const RISK_PRESETS = {
@@ -535,7 +582,7 @@ const SCENARIOS = {
 
 /* ═══════════════ APP ═══════════════ */
 
-export default function FrontierApp() {
+function FrontierApp() {
   const [view, setView] = useState("landing");
   const [mode, setMode] = useState("basic"); // basic | advanced
   const [plan, setPlanRaw] = useState(() => { try { return localStorage.getItem("fx_plan") || "free"; } catch (e) { return "free"; } });
@@ -591,17 +638,26 @@ export default function FrontierApp() {
   const [ckErr, setCkErr] = useState(null);
   const [trialEnds, setTrialEnds] = useState(null);
 
-  // basic-mode state
-  const [bHoldings, setBHoldings] = useState([{ name: "", amount: 0, risk: "med" }]);
+  // basic-mode state — restored from the same saved book (it was persisted but
+  // never read back, so Basic mode always reset to empty on reload).
+  const [bHoldings, setBHoldings] = useState(() => {
+    try {
+      const b = JSON.parse(localStorage.getItem("fx_book") || "null");
+      return (b && sanitizeHoldings(b.bHoldings)) || [{ name: "", amount: 0, risk: "med" }];
+    } catch (e) { return [{ name: "", amount: 0, risk: "med" }]; }
+  });
   const [bYears, setBYears] = useState(10);
   const [bMonthly, setBMonthly] = useState(0);
 
   // advanced-mode state
   const savedBook = (() => { try { return JSON.parse(localStorage.getItem("fx_book") || "null"); } catch (e) { return null; } })();
-  const [assets, setAssets] = useState(savedBook && savedBook.assets ? savedBook.assets : DEFAULT_ASSETS);
-  const [corr, setCorr] = useState(defaultCorr(DEFAULT_ASSETS.length));
-  const [rf, setRf] = useState(3.5);
-  const [A, setA] = useState(4);
+  const initAssets = (savedBook && sanitizeAssets(savedBook.assets)) || DEFAULT_ASSETS;
+  const [assets, setAssets] = useState(initAssets);
+  // Sized from the restored assets, not DEFAULT_ASSETS — a saved book with more
+  // than 5 holdings previously left this matrix too small and crashed the render.
+  const [corr, setCorr] = useState(() => normalizeCorr(savedBook && savedBook.corr, initAssets.length));
+  const [rf, setRf] = useState(savedBook && isFinite(Number(savedBook.rf)) ? Number(savedBook.rf) : 3.5);
+  const [A, setA] = useState(savedBook && isFinite(Number(savedBook.A)) ? Number(savedBook.A) : 4);
   const [longOnly, setLongOnly] = useState(true);
   const [scenario, setScenario] = useState("base");
   const [mcYears, setMcYears] = useState(10);
@@ -1525,5 +1581,51 @@ export default function FrontierApp() {
 
       {view === "landing" ? Landing() : mode === "basic" ? BasicMode() : AdvancedMode()}
     </div>
+  );
+}
+
+/* A render-time throw anywhere in the tree unmounts everything and leaves the
+   user staring at a blank page with no way to recover — saved state that puts
+   the app in a bad shape would keep re-crashing on every reload. Catch it,
+   explain it, and offer a one-click reset of the persisted book. */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null };
+  }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const reset = () => {
+      try { localStorage.removeItem("fx_book"); localStorage.removeItem("fx_plan"); } catch (e) {}
+      window.location.reload();
+    };
+    return (
+      <div style={{ minHeight: "100vh", background: T.paper, color: T.ink, fontFamily: T.ui, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ maxWidth: 460, width: "100%", background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radiusLg, boxShadow: T.shadow, padding: 28 }}>
+          <div style={{ ...label, color: T.copper, marginBottom: 10 }}>Something broke</div>
+          <h1 style={{ fontFamily: T.disp, fontSize: 22, fontWeight: 800, margin: "0 0 10px", color: T.ink }}>
+            The app couldn't render.
+          </h1>
+          <p style={{ fontSize: 13.5, color: T.sub, lineHeight: 1.65, margin: "0 0 18px" }}>
+            This is usually caused by a saved portfolio that no longer matches what the
+            model expects. Resetting the saved data clears it and reloads the app. Your
+            holdings will need to be re-entered.
+          </p>
+          <div style={{ background: T.surface, borderRadius: T.radiusSm, padding: "10px 12px", marginBottom: 18, fontSize: 11.5, color: T.faint, fontFamily: T.mono, wordBreak: "break-word" }}>
+            {String((this.state.err && this.state.err.message) || this.state.err)}
+          </div>
+          <Btn primary wide pill onClick={reset}>Reset saved data &amp; reload</Btn>
+        </div>
+      </div>
+    );
+  }
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <FrontierApp />
+    </ErrorBoundary>
   );
 }
