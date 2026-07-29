@@ -4,6 +4,7 @@ import {
   Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ComposedChart, Area, AreaChart, PieChart, Pie, Cell,
 } from "recharts";
+import { Analytics } from "@vercel/analytics/react";
 
 /* ═══════════════ MATH CORE ═══════════════ */
 
@@ -1652,6 +1653,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <FrontierApp />
+      <Analytics />
     </ErrorBoundary>
   );
 }
