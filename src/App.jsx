@@ -248,6 +248,10 @@ const sanitizeHoldings = (raw) => {
     };
   });
 };
+// Single source of truth for the Pro price — keep in sync with the Stripe Price object.
+const PRO_PRICE = "$7.99";
+const PRO_PRICE_MO = PRO_PRICE + "/mo";
+
 // Basic mode: plain-language risk presets instead of E[r]/σ inputs
 const RISK_PRESETS = {
   low: { label: "Steady", desc: "Utilities, staples, big banks", er: 6, sigma: 15 },
@@ -897,7 +901,7 @@ function FrontierApp() {
           Subscribe to Pro
         </h2>
         <p style={{ fontSize: 12.5, color: T.sub, margin: "0 0 18px", lineHeight: 1.55 }}>
-          $14.99/mo, cancel anytime.
+          {PRO_PRICE_MO}, cancel anytime.
         </p>
         <div style={{ display: "grid", gap: 10 }}>
           <input placeholder="Email" value={ckEmail} onChange={(e) => setCkEmail(e.target.value)} style={ckField} />
@@ -911,7 +915,7 @@ function FrontierApp() {
         {ckErr && <div style={{ fontSize: 12.5, color: T.red, marginTop: 10 }}>{ckErr}</div>}
         <div style={{ marginTop: 18 }}>
           <Btn primary wide pill onClick={activatePlan}>
-            Subscribe — $14.99/mo
+            Subscribe — {PRO_PRICE_MO}
           </Btn>
         </div>
         <div style={{ fontSize: 10, color: T.faint, marginTop: 12, lineHeight: 1.5, textAlign: "center" }}>
@@ -932,7 +936,7 @@ function FrontierApp() {
             {[
               { name: "Basic", price: "$0", items: ["Plain-language check-up", "Risk & diversification read", "Dollar-based projection"], cta: "Included", act: () => { setPlan("free"); setMode("basic"); setShowPaywall(false); setView("app"); } },
               { name: "Advanced", price: "$0", items: ["Full optimizer & frontier", "Monte Carlo simulator", "Quantitative diagnostics"], cta: "Open toolkit", act: () => { setPlan(plan); setMode("advanced"); setShowPaywall(false); setView("app"); } },
-              { name: "Pro", price: "$14.99/mo", hi: true, items: ["AI observations", "Security news briefs", "Crisis stress lab", "Correlation lab", "Long-only solver"], cta: "Subscribe", act: () => { setShowPaywall(false); setShowCheckout("pro"); } },
+              { name: "Pro", price: PRO_PRICE_MO, hi: true, items: ["AI observations", "Security news briefs", "Crisis stress lab", "Correlation lab", "Long-only solver"], cta: "Subscribe", act: () => { setShowPaywall(false); setShowCheckout("pro"); } },
             ].map((p, i) => (
               <div key={i} style={{
                 padding: 20, borderRadius: T.radiusLg,
@@ -998,7 +1002,7 @@ function FrontierApp() {
           {[
             { tier: "Basic", tag: "Free · plain language", d: "Type in what you own and what it's worth. Get a risk grade, a risk-mix breakdown, plain-English flags, and a dollar-figure projection that includes your monthly contributions — no jargon anywhere.", act: () => { setMode("basic"); setView("app"); }, cta: "Start here" },
             { tier: "Advanced", tag: "Free · full mathematics", d: "Tangency and minimum-variance portfolios solved in closed form, the efficient frontier, capital allocation line, Monte Carlo simulation, and six live diagnostics.", act: () => { setMode("advanced"); setView("app"); }, cta: "Open toolkit" },
-            { tier: "Pro", tag: "$14.99/mo · analytical extras", d: "Crisis stress testing, a fully editable correlation lab, long-only optimization, AI observations, and factual news briefs on any holding.", act: () => setShowPaywall(true), cta: "See Pro", hi: true },
+            { tier: "Pro", tag: PRO_PRICE_MO + " · analytical extras", d: "Crisis stress testing, a fully editable correlation lab, long-only optimization, AI observations, and factual news briefs on any holding.", act: () => setShowPaywall(true), cta: "See Pro", hi: true },
           ].map((t, i) => (
             <div key={i} style={{
               padding: 28, borderRadius: T.radiusLg,
