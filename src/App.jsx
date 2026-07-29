@@ -479,11 +479,33 @@ const num = (v, d = 2) => (isFinite(v) ? v.toFixed(d) : "—");
 const money = (v) => (isFinite(v) ? "$" + Math.round(v).toLocaleString() : "—");
 const label = { fontFamily: T.ui, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.11em", color: T.sub };
 
+/* Numeric input.
+   Held as raw text while focused so half-typed states ("", "-", "1.") survive
+   instead of being round-tripped through parseFloat on every keystroke — that
+   round-trip is what used to strand a leading zero ("05000"), since an
+   unchanged parsed value means React never rewrites the DOM. Selecting on
+   focus means typing replaces the existing figure rather than appending to it.
+   type=text + inputMode=decimal drops the spinner arrows, which were eating
+   ~17px of an already-tight box and clipping longer amounts. */
 function Field({ value, onChange, w = 58 }) {
+  const [draft, setDraft] = useState(null);
+  const shown = draft !== null ? draft : String(value == null ? 0 : value);
   return (
-    <input type="number" value={value}
-      onChange={(e) => onChange(e.target.value === "" ? 0 : parseFloat(e.target.value))}
-      style={{ width: w, padding: "6px 9px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.ui, fontVariantNumeric: "tabular-nums", fontSize: 13, color: T.ink, background: T.surface, textAlign: "right", outline: "none" }} />
+    <input type="text" inputMode="decimal" value={shown}
+      onFocus={(e) => { setDraft(String(value == null ? 0 : value)); e.target.select(); }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (!/^-?\d*\.?\d*$/.test(raw)) return; // ignore keystrokes that aren't part of a number
+        setDraft(raw);
+        const n = parseFloat(raw);
+        if (isFinite(n)) onChange(n); // partial input ("", "-", ".") just waits for blur
+      }}
+      onBlur={() => {
+        const n = parseFloat(draft === null ? "" : draft);
+        onChange(isFinite(n) ? n : 0);
+        setDraft(null);
+      }}
+      style={{ width: w, padding: "6px 9px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.ui, fontVariantNumeric: "tabular-nums", fontSize: 13, color: T.ink, background: T.surface, textAlign: "right", outline: "none", boxSizing: "border-box" }} />
   );
 }
 function Btn({ children, onClick, primary, small, wide, pill, disabled }) {
@@ -1048,7 +1070,7 @@ function FrontierApp() {
                 onSelect={(r) => setBHoldings(bHoldings.map((x, k) => (k === i ? { ...x, name: r.t, risk: riskFromVol(r.vol) } : x)))} />
             </div>
             <span style={{ fontSize: 13, color: T.sub }}>$</span>
-            <Field value={h.amount} onChange={(v) => setB(i, "amount", v)} w={86} />
+            <Field value={h.amount} onChange={(v) => setB(i, "amount", v)} w={104} />
             <select value={h.risk} onChange={(e) => setB(i, "risk", e.target.value)}
               style={{ padding: "8px 10px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.ui, fontSize: 12.5, color: T.ink, background: T.surface }}>
               {Object.entries(RISK_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label} — {p.desc}</option>)}
@@ -1123,7 +1145,7 @@ function FrontierApp() {
             right={
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 <label style={{ fontSize: 12, color: T.sub, display: "flex", gap: 6, alignItems: "center" }}>
-                  Adding $<Field value={bMonthly} onChange={(v) => setBMonthly(Math.max(0, v))} w={64} />/mo
+                  Adding $<Field value={bMonthly} onChange={(v) => setBMonthly(Math.max(0, v))} w={80} />/mo
                 </label>
                 <label style={{ fontSize: 12, color: T.sub, display: "flex", gap: 6, alignItems: "center" }}>
                   Years <Field value={bYears} onChange={(v) => setBYears(Math.max(1, Math.min(40, Math.round(v))))} w={56} />
@@ -1261,7 +1283,7 @@ function FrontierApp() {
                         onChange={(v) => setAsset(i, "name", v.toUpperCase())}
                         onSelect={(r) => setAssets(assets.map((x, k) => (k === i ? { ...x, name: r.t, er: typeof r.beta === "number" ? Math.round((rf + r.beta * 5.5) * 10) / 10 : erFromVol(r.vol), sigma: r.vol } : x)))} />
                     </td>
-                    <td style={{ ...td, textAlign: "right" }}><Field value={a.amount == null ? 0 : a.amount} onChange={(v) => setAsset(i, "amount", v)} w={72} /></td>
+                    <td style={{ ...td, textAlign: "right" }}><Field value={a.amount == null ? 0 : a.amount} onChange={(v) => setAsset(i, "amount", v)} w={100} /></td>
 <td style={{ ...td, textAlign: "right" }}><Field value={a.er} onChange={(v) => setAsset(i, "er", v)} w={50} /></td>
                     <td style={{ ...td, textAlign: "right" }}><Field value={a.sigma} onChange={(v) => setAsset(i, "sigma", v)} w={50} /></td>
                     <td style={{ ...numTd(base ? base.tan.w[i] : 0), fontWeight: 700 }}>{base ? pct(base.tan.w[i]) : "—"}</td>
@@ -1380,7 +1402,7 @@ function FrontierApp() {
           <Panel title="Monte Carlo wealth simulation · 500 paths"
             right={
               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}><span style={{ minWidth: 52 }}>Start $</span><Field value={mcStart} onChange={setMcStart} w={84} /></label>
+                <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}><span style={{ minWidth: 52 }}>Start $</span><Field value={mcStart} onChange={setMcStart} w={104} /></label>
                 <label style={{ fontSize: 11.5, color: T.sub, display: "flex", gap: 5, alignItems: "center" }}><span style={{ minWidth: 38 }}>Years</span><Field value={mcYears} onChange={(v) => setMcYears(Math.max(1, Math.min(40, Math.round(v))))} w={84} /></label>
                 <Btn small onClick={() => setMcSeed(mcSeed + 1)}>Re-run</Btn>
               </div>
