@@ -32,7 +32,7 @@ async function main(req, res) {
     } catch (e) { return ""; }
   };
   const isCad = (s) => /\.(TO|V|NE|CN)$/i.test(s);
-  const weeklyCloses = async (sym) => {
+  const weeklyClosesOnce = async (sym) => {
     const r = await tfetch(
       "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=5y&interval=1wk",
       { headers: { "user-agent": "Mozilla/5.0" } }, 7000
@@ -49,6 +49,9 @@ async function main(req, res) {
       return Object.keys(map).length ? map : null;
     } catch (e) { return null; }
   };
+  // One retry: a transient Yahoo/network failure on one symbol shouldn't
+  // permanently blank that asset's CAPM inputs for the whole session.
+  const weeklyCloses = async (sym) => (await weeklyClosesOnce(sym)) || (await weeklyClosesOnce(sym));
   const stats = (arr) => {
     const m = arr.reduce((a, b) => a + b, 0) / arr.length;
     const v = arr.reduce((a, b) => a + (b - m) * (b - m), 0) / (arr.length - 1);
@@ -110,44 +113,54 @@ async function main(req, res) {
       }
       const bench = await weeklyCloses(BENCH);
       const ok = maps.map((m) => m != null);
-      const sets = maps.filter((m) => m).map((m) => Object.keys(m));
-      if (bench) sets.push(Object.keys(bench));
-      let common = sets.length ? sets[0] : [];
-      for (const ws of sets) common = common.filter((k) => ws.indexOf(k) >= 0);
-      common.sort((a, b) => Number(a) - Number(b));
-      if (common.length < 15) {
-        return res.status(200).json({ note: "Not enough overlapping price history.", points: common.length, vols: syms.map(() => null), betas: syms.map(() => null), corr: null });
-      }
-      const retsOf = (m) => {
-        if (!m) return null;
+      const sortedKeys = (m) => Object.keys(m).sort((a, b) => Number(a) - Number(b));
+      const retsAt = (m, keys) => {
         const out = [];
-        for (let i = 1; i < common.length; i++) out.push(Math.log(m[common[i]] / m[common[i - 1]]));
+        for (let i = 1; i < keys.length; i++) out.push(Math.log(m[keys[i]] / m[keys[i - 1]]));
         return out;
       };
-      const rets = maps.map(retsOf);
-      const bret = retsOf(bench);
-      const vols = rets.map((r) => r ? Math.max(5, Math.min(150, Math.round(stats(r).sd * Math.sqrt(52) * 100))) : null);
+      // Each asset's own volatility depends only on its own history — never on
+      // another asset's data availability or the benchmark's.
+      const ownRets = maps.map((m) => {
+        if (!m) return null;
+        const ks = sortedKeys(m);
+        return ks.length >= 11 ? retsAt(m, ks) : null;
+      });
+      const vols = ownRets.map((r) => (r ? Math.max(5, Math.min(150, Math.round(stats(r).sd * Math.sqrt(52) * 100))) : null));
+      // Beta uses only the overlap between that one asset and the benchmark —
+      // one thin-history asset elsewhere in the batch can no longer zero out
+      // every other asset's beta (and therefore CAPM E[r]).
       let betas = syms.map(() => null);
-      if (bret) {
-        const sb = stats(bret);
-        betas = rets.map((r) => {
-          if (!r) return null;
-          const sa = stats(r);
+      let benchPoints = 0;
+      if (bench) {
+        const benchKeys = new Set(Object.keys(bench));
+        betas = maps.map((m) => {
+          if (!m) return null;
+          const common = sortedKeys(m).filter((k) => benchKeys.has(k));
+          if (common.length < 13) return null;
+          const ra = retsAt(m, common), rb = retsAt(bench, common);
+          benchPoints = Math.max(benchPoints, ra.length);
+          const sa = stats(ra), sb = stats(rb);
           let cov = 0;
-          for (let k = 0; k < r.length; k++) cov += (r[k] - sa.mean) * (bret[k] - sb.mean);
-          cov /= (r.length - 1);
+          for (let k = 0; k < ra.length; k++) cov += (ra[k] - sa.mean) * (rb[k] - sb.mean);
+          cov /= (ra.length - 1);
           const b = cov / sb.varr;
           return isFinite(b) ? Math.round(Math.max(-1, Math.min(4, b)) * 100) / 100 : null;
         });
       }
+      // Correlation between any pair uses only that pair's own overlap, not a
+      // single intersection forced across the whole portfolio.
       const n = syms.length;
+      const keySets = maps.map((m) => (m ? new Set(Object.keys(m)) : null));
       const corr = [];
       for (let i = 0; i < n; i++) {
         corr.push([]);
         for (let j = 0; j < n; j++) {
           if (i === j) { corr[i].push(1); continue; }
-          if (!rets[i] || !rets[j]) { corr[i].push(null); continue; }
-          const a = rets[i], b = rets[j];
+          if (!maps[i] || !maps[j]) { corr[i].push(null); continue; }
+          const common = sortedKeys(maps[i]).filter((k) => keySets[j].has(k));
+          if (common.length < 13) { corr[i].push(null); continue; }
+          const a = retsAt(maps[i], common), b = retsAt(maps[j], common);
           const sa = stats(a), sb2 = stats(b);
           let cov = 0;
           for (let k = 0; k < a.length; k++) cov += (a[k] - sa.mean) * (b[k] - sb2.mean);
@@ -156,11 +169,15 @@ async function main(req, res) {
           corr[i].push(isFinite(c) ? Math.max(-0.99, Math.min(0.99, c)) : null);
         }
       }
+      const notes = [];
+      if (mixed && !fx) notes.push("USD/CAD rate unavailable — figures use each holding's native currency.");
+      if (!bench) notes.push("Benchmark (" + BENCH + ") data unavailable — betas could not be computed this round.");
       return res.status(200).json({
-        points: common.length - 1, vols, betas, corr,
+        points: benchPoints, vols, betas, corr,
         benchmark: BENCH,
-        currency: mixed ? "CAD (USD holdings converted)" : (anyCad ? "CAD" : "USD"),
+        currency: mixed ? (fx ? "CAD (USD holdings converted)" : "mixed, unconverted") : (anyCad ? "CAD" : "USD"),
         missing: syms.filter((s, i) => !ok[i]),
+        ...(notes.length ? { note: notes.join(" ") } : {}),
       });
     }
     const cap = getParam("capm");

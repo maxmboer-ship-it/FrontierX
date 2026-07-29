@@ -356,8 +356,8 @@ function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
     left: Math.min(rect.left, Math.max(8, window.innerWidth - 258)),
     ...(flipUp ? { bottom: window.innerHeight - rect.top + 2 } : { top: rect.bottom + 2 }),
     zIndex: 1000, width: 250, maxHeight: DROP_H, overflowY: "auto",
-    background: T.band, border: `1px solid ${T.ruleDark}`,
-    borderTop: `2px solid ${T.green}`, boxShadow: "0 8px 24px rgba(12,18,16,0.16)",
+    background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd,
+    boxShadow: T.shadow, overflow: "hidden",
   } : null;
   return (
     <div style={{ position: "relative", display: "inline-block", width }}>
@@ -366,15 +366,15 @@ function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
         onFocus={() => { measure(); setOpen(true); }}
         onBlur={() => setTimeout(() => setOpen(false), 160)}
         placeholder="Any ticker or name"
-        style={{ width: "100%", padding: "6px 8px", border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontFamily: T.ui, fontSize: 13, fontWeight: bold ? 700 : 500, color: T.ink, background: T.surface, outline: "none", boxSizing: "border-box" }} />
+        style={{ width: "100%", padding: "8px 11px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.ui, fontSize: 13, fontWeight: bold ? 700 : 500, color: T.ink, background: T.surface, outline: "none", boxSizing: "border-box" }} />
       {open && results.length > 0 && dropStyle && (
-        <div style={dropStyle}>
+        <div style={{ ...dropStyle, padding: 6 }}>
           {results.map((r) => (
             <div key={r.t}
               onMouseDown={(e) => { e.preventDefault(); pick(r); }}
-              style={{ padding: "8px 10px", borderBottom: `1px solid ${T.rule}`, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#1B2530")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = T.band)}>
+              style={{ padding: "8px 10px", borderRadius: T.radiusSm, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = T.surface)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
               <div style={{ minWidth: 0 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{r.t}</span>
                 <span style={{ fontSize: 11.5, color: T.sub, marginLeft: 7 }}>{r.n}</span>
@@ -392,25 +392,36 @@ function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
 /* ═══════════════ DESIGN TOKENS — sharp editorial light ═══════════════ */
 
 const T = {
-  paper: "#0C1116",        // terminal base
-  band: "#121A22",         // raised panel
-  surface: "#141C25",      // inputs / cells
-  ink: "#E8EEF2",
-  sub: "#93A1AD",
-  faint: "#5C6873",
-  rule: "#212B35",
-  ruleDark: "#35424F",
-  green: "#2EBD85",        // up / primary
-  greenDeep: "#1F8A62",
-  steel: "#4C9AFF",        // secondary series
-  copper: "#E8A33D",       // amber highlight
-  red: "#F6465D",          // down
-  goldBg: "#251C0D",       // amber warning bg
-  ui: "'Inter', -apple-system, sans-serif",
-  disp: "'Archivo', 'Inter', sans-serif",
-  mono: "'IBM Plex Mono', ui-monospace, Menlo, monospace",
+  paper: "#030712",        // page base
+  band: "#111827",         // elevated card
+  band2: "#161F2E",        // slightly higher elevation (nested/highlighted cards)
+  surface: "#1F2937",      // inputs / cells
+  ink: "#F5F7FA",
+  sub: "#9CA3AF",
+  faint: "#6B7280",
+  rule: "#1F2937",
+  ruleDark: "#31404F",
+  green: "#10B981",        // primary — emerald
+  greenDeep: "#059669",
+  greenLight: "#34D399",
+  sage: "#7C9A8E",         // secondary accent
+  steel: "#60A5FA",        // chart / info accent
+  copper: "#FBBF24",       // amber highlight
+  red: "#F87171",          // down / negative
+  goldBg: "rgba(251,191,36,0.09)",
+  goldBorder: "rgba(251,191,36,0.32)",
+  ui: "'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  disp: "'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  mono: "'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  radius: 20,     // modals, hero art
+  radiusLg: 16,   // panels / pricing cards
+  radiusMd: 10,   // buttons / inputs / stat cards
+  radiusSm: 8,    // small chips / table cells
+  pill: 999,      // pill buttons, badges, segmented controls
+  shadow: "0 1px 2px rgba(0,0,0,.3), 0 20px 44px -16px rgba(0,0,0,.6)",
+  shadowSm: "0 1px 2px rgba(0,0,0,.25), 0 8px 20px -8px rgba(0,0,0,.45)",
 };
-const PALETTE = [T.green, T.steel, T.copper, "#B180F0", "#F6465D", "#25C2C2", "#D4B106", "#7E93A8", "#E06B9A", "#5AD1B3"];
+const PALETTE = [T.green, T.steel, T.copper, "#A78BFA", T.red, "#2DD4BF", "#FACC15", "#94A3B8", "#F472B6", T.greenLight];
 
 const pct = (v, d = 1) => (isFinite(v) ? (v * 100).toFixed(d) + "%" : "—");
 const num = (v, d = 2) => (isFinite(v) ? v.toFixed(d) : "—");
@@ -421,72 +432,85 @@ function Field({ value, onChange, w = 58 }) {
   return (
     <input type="number" value={value}
       onChange={(e) => onChange(e.target.value === "" ? 0 : parseFloat(e.target.value))}
-      style={{ width: w, padding: "5px 7px", border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontFamily: T.ui, fontVariantNumeric: "tabular-nums", fontSize: 13, color: T.ink, background: T.surface, textAlign: "right", outline: "none" }} />
+      style={{ width: w, padding: "6px 9px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.ui, fontVariantNumeric: "tabular-nums", fontSize: 13, color: T.ink, background: T.surface, textAlign: "right", outline: "none" }} />
   );
 }
-function Btn({ children, onClick, primary, small, wide }) {
+function Btn({ children, onClick, primary, small, wide, pill, disabled }) {
   return (
-    <button onClick={onClick} style={{
-      fontFamily: T.ui, fontSize: small ? 12.5 : 14, fontWeight: 600,
-      padding: small ? "7px 14px" : "12px 24px", borderRadius: 3, cursor: "pointer",
-      border: `1.5px solid ${primary ? T.green : T.ruleDark}`,
-      background: primary ? T.green : T.surface,
-      color: primary ? "#07130E" : T.green,
+    <button onClick={onClick} disabled={disabled} style={{
+      fontFamily: T.ui, fontSize: small ? 12.5 : 14.5, fontWeight: 700,
+      padding: small ? "8px 16px" : "13px 26px", borderRadius: pill ? T.pill : T.radiusMd,
+      cursor: disabled ? "default" : "pointer",
+      border: primary ? "none" : `1.5px solid ${T.ruleDark}`,
+      background: primary ? `linear-gradient(180deg, ${T.greenLight}, ${T.green})` : "transparent",
+      color: primary ? "#04140D" : T.ink,
+      opacity: disabled ? 0.5 : 1,
+      boxShadow: primary ? "0 6px 18px -6px rgba(16,185,129,0.55)" : "none",
       width: wide ? "100%" : "auto",
+      transition: "transform .12s ease, box-shadow .12s ease",
     }}>{children}</button>
   );
 }
 function Hint({ children }) {
   return (
-    <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.55, marginBottom: 12, paddingLeft: 10, borderLeft: `2px solid ${T.ruleDark}` }}>
+    <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.6, marginBottom: 14, padding: "9px 14px", background: "rgba(255,255,255,0.03)", borderRadius: T.radiusSm }}>
       {children}
     </div>
   );
 }
 function Panel({ title, right, children, band }) {
   return (
-    <div style={{ background: band ? T.band : T.paper, border: `1px solid ${T.rule}`, borderTop: `3px solid ${T.green}`, marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: `1px solid ${T.rule}`, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ ...label, color: T.ink }}>{title}</span>{right}
+    <div style={{
+      background: band ? T.band2 : T.band,
+      border: `1px solid ${band ? T.goldBorder : T.rule}`,
+      borderRadius: T.radiusLg, boxShadow: T.shadowSm, marginBottom: 20, overflow: "hidden",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${T.rule}`, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ ...label, color: T.ink, fontSize: 11.5 }}>{title}</span>{right}
       </div>
-      <div style={{ padding: 16 }}>{children}</div>
+      <div style={{ padding: 20 }}>{children}</div>
     </div>
   );
 }
-// Engraved-chart hero art: fine green line-work on paper — swap for a licensed
-// photograph (e.g. Unsplash: trading floor, skyline) at deploy time if preferred.
-function HeroArt() {
-  const rows = useMemo(() => {
-    const mk = (seed, amp, base) => {
-      let y = base, out = "";
-      for (let x = 0; x <= 100; x += 1.5) {
-        y += (Math.sin(x / 6 + seed) * 0.7 + Math.random() - 0.46) * amp;
-        out += `${x},${Math.max(6, Math.min(94, y))} `;
-      }
-      return out.trim();
-    };
-    return Array.from({ length: 7 }, (_, i) => mk(i * 2.3, 1.1 + i * 0.14, 78 - i * 9));
-  }, []);
+function StatRow({ items, cols = "repeat(auto-fit, minmax(150px, 1fr))" }) {
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
-      {Array.from({ length: 11 }, (_, i) => (
-        <line key={i} x1={i * 10} y1="0" x2={i * 10} y2="100" stroke={T.rule} strokeWidth="0.15" />
+    <div style={{ display: "grid", gridTemplateColumns: cols, gap: 12, marginBottom: 20 }}>
+      {items.map((k, i) => (
+        <div key={i} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radiusMd, padding: "14px 16px", boxShadow: T.shadowSm }}>
+          <div style={{ ...label, fontSize: 9.5, marginBottom: 6 }}>{k.l}</div>
+          <div style={{ fontFamily: T.ui, fontSize: 20, fontWeight: 800, color: k.c || T.ink, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
+        </div>
       ))}
-      {rows.map((p, i) => (
-        <polyline key={i} points={p} fill="none" stroke={i === 3 ? T.green : T.ruleDark}
-          strokeWidth={i === 3 ? 0.6 : 0.25} opacity={i === 3 ? 1 : 0.8} />
+    </div>
+  );
+}
+// Soft blurred gradient blobs — echoes the reference site's animated hero background.
+function HeroArt() {
+  const blobs = [
+    { c: T.green, top: "-8%", left: "6%", size: 340, dur: "22s", delay: "0s" },
+    { c: T.steel, top: "18%", left: "62%", size: 300, dur: "26s", delay: "-6s" },
+    { c: T.sage, top: "48%", left: "22%", size: 260, dur: "19s", delay: "-3s" },
+  ];
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+      {blobs.map((b, i) => (
+        <div key={i} className="fx-blob" style={{
+          position: "absolute", top: b.top, left: b.left, width: b.size, height: b.size,
+          borderRadius: "50%", background: b.c, opacity: 0.28, filter: "blur(70px)",
+          animationDuration: b.dur, animationDelay: b.delay,
+        }} />
       ))}
-    </svg>
+    </div>
   );
 }
 function TypeBadge({ type }) {
   const map = {
-    strength: { t: "Strength", bg: "rgba(46,189,133,0.14)", c: T.green },
-    consideration: { t: "Consideration", bg: "rgba(76,154,255,0.14)", c: T.steel },
-    flag: { t: "Flag", bg: "rgba(232,163,61,0.16)", c: T.copper },
+    strength: { t: "Strength", bg: "rgba(16,185,129,0.14)", c: T.green },
+    consideration: { t: "Consideration", bg: "rgba(96,165,250,0.14)", c: T.steel },
+    flag: { t: "Flag", bg: "rgba(251,191,36,0.16)", c: T.copper },
   };
   const m = map[type] || map.consideration;
-  return <span style={{ fontFamily: T.ui, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", background: m.bg, color: m.c, padding: "3px 8px", borderRadius: 2 }}>{m.t}</span>;
+  return <span style={{ fontFamily: T.ui, fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", background: m.bg, color: m.c, padding: "4px 10px", borderRadius: T.pill }}>{m.t}</span>;
 }
 
 // Luhn checksum for demo card validation
@@ -552,7 +576,8 @@ export default function FrontierApp() {
       const bl = (d.betas && d.betas.some((b) => typeof b === "number"))
         ? " Betas vs " + (d.benchmark || "SPY") + ": " + assets.map((a, i) => a.name + " " + (d.betas[i] != null ? d.betas[i].toFixed(2) : "n/a")).join(", ") + "."
         : "";
-      setMktNote(d.note ? d.note : "Dividend-adjusted, in " + (d.currency || "native currency") + ". σ, ρ and β computed from " + (d.points || 0) + " weekly observations. E[r] set by CAPM: rf + β × 5.5% market risk premium." + bl + miss);
+      const warn = d.note ? " " + d.note : "";
+      setMktNote("Dividend-adjusted, in " + (d.currency || "native currency") + ". σ, ρ and β computed from " + (d.points || 0) + " weekly observations (per asset). E[r] set by CAPM: rf + β × 5.5% market risk premium." + bl + miss + warn);
     } catch (e) {
       setMktNote("Couldn't reach market data.");
     } finally { setMktLoading(false); }
@@ -808,15 +833,15 @@ export default function FrontierApp() {
     setShowCheckout(null); setView("app");
     setCkCard(""); setCkExp(""); setCkCvc("");
   };
-  const ckField = { width: "100%", padding: "9px 10px", border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontFamily: T.mono, fontSize: 13.5, color: T.ink, background: T.surface, outline: "none", boxSizing: "border-box" };
+  const ckField = { width: "100%", padding: "11px 13px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.mono, fontSize: 13.5, color: T.ink, background: T.surface, outline: "none", boxSizing: "border-box" };
   const Checkout = () => (
-    <div onClick={() => setShowCheckout(null)} style={{ position: "fixed", inset: 0, background: "rgba(6,10,14,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.paper, border: `1px solid ${T.ruleDark}`, borderTop: `4px solid ${T.green}`, maxWidth: 420, width: "100%", padding: 24 }}>
-        <h2 style={{ fontFamily: T.disp, fontSize: 19, fontWeight: 800, margin: "0 0 4px", color: T.ink }}>
-          "Subscribe to Pro"
+    <div onClick={() => setShowCheckout(null)} style={{ position: "fixed", inset: 0, background: "rgba(3,7,18,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radius, boxShadow: T.shadow, maxWidth: 420, width: "100%", padding: 28 }}>
+        <h2 style={{ fontFamily: T.disp, fontSize: 20, fontWeight: 800, margin: "0 0 4px", color: T.ink }}>
+          Subscribe to Pro
         </h2>
-        <p style={{ fontSize: 12.5, color: T.sub, margin: "0 0 16px", lineHeight: 1.55 }}>
-"$14.99/mo, cancel anytime."
+        <p style={{ fontSize: 12.5, color: T.sub, margin: "0 0 18px", lineHeight: 1.55 }}>
+          $14.99/mo, cancel anytime.
         </p>
         <div style={{ display: "grid", gap: 10 }}>
           <input placeholder="Email" value={ckEmail} onChange={(e) => setCkEmail(e.target.value)} style={ckField} />
@@ -828,12 +853,12 @@ export default function FrontierApp() {
           </div>
         </div>
         {ckErr && <div style={{ fontSize: 12.5, color: T.red, marginTop: 10 }}>{ckErr}</div>}
-        <div style={{ marginTop: 16 }}>
-          <Btn primary wide onClick={activatePlan}>
-            "Subscribe — $14.99/mo"
+        <div style={{ marginTop: 18 }}>
+          <Btn primary wide pill onClick={activatePlan}>
+            Subscribe — $14.99/mo
           </Btn>
         </div>
-        <div style={{ fontSize: 10, color: T.faint, marginTop: 10, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 10, color: T.faint, marginTop: 12, lineHeight: 1.5, textAlign: "center" }}>
           Secure checkout demo — replaced by Stripe Checkout in production. No card details are stored.
         </div>
       </div>
@@ -842,24 +867,28 @@ export default function FrontierApp() {
 
   /* ═════════ PAYWALL ═════════ */
   const Paywall = () => (
-    <div onClick={() => setShowPaywall(false)} style={{ position: "fixed", inset: 0, background: "rgba(12,18,16,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: T.paper, border: `1px solid ${T.ruleDark}`, borderTop: `4px solid ${T.green}`, maxWidth: 720, width: "100%" }}>
-        <div style={{ padding: "22px 24px" }}>
-          <h2 style={{ fontFamily: T.disp, fontSize: 22, fontWeight: 800, margin: "0 0 4px", color: T.ink }}>Plans</h2>
-          <p style={{ fontSize: 12.5, color: T.sub, margin: "0 0 18px" }}>Basic and Advanced are free. Pro adds the analytical extras.</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 0, border: `1px solid ${T.rule}` }}>
+    <div onClick={() => setShowPaywall(false)} style={{ position: "fixed", inset: 0, background: "rgba(3,7,18,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radius, boxShadow: T.shadow, maxWidth: 760, width: "100%" }}>
+        <div style={{ padding: "28px 28px 24px" }}>
+          <h2 style={{ fontFamily: T.disp, fontSize: 24, fontWeight: 800, margin: "0 0 6px", color: T.ink }}>Plans</h2>
+          <p style={{ fontSize: 13, color: T.sub, margin: "0 0 22px" }}>Basic and Advanced are free. Pro adds the analytical extras.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
             {[
               { name: "Basic", price: "$0", items: ["Plain-language check-up", "Risk & diversification read", "Dollar-based projection"], cta: "Included", act: () => { setPlan("free"); setMode("basic"); setShowPaywall(false); setView("app"); } },
               { name: "Advanced", price: "$0", items: ["Full optimizer & frontier", "Monte Carlo simulator", "Quantitative diagnostics"], cta: "Open toolkit", act: () => { setPlan(plan); setMode("advanced"); setShowPaywall(false); setView("app"); } },
               { name: "Pro", price: "$14.99/mo", hi: true, items: ["AI observations", "Security news briefs", "Crisis stress lab", "Correlation lab", "Long-only solver"], cta: "Subscribe", act: () => { setShowPaywall(false); setShowCheckout("pro"); } },
             ].map((p, i) => (
-              <div key={i} style={{ padding: 18, borderRight: i < 2 ? `1px solid ${T.rule}` : "none", background: p.hi ? "#152420" : T.band }}>
-                <div style={{ fontFamily: T.disp, fontWeight: 800, fontSize: 15, color: p.hi ? T.green : T.ink }}>{p.name}</div>
-                <div style={{ fontFamily: T.mono, fontVariantNumeric: "tabular-nums", fontSize: 24, fontWeight: 800, margin: "6px 0 2px", color: T.ink }}>{p.price}</div>
-                <div style={{ fontSize: 10.5, color: T.green, fontWeight: 700, marginBottom: 8, minHeight: 14 }}>{p.sub || ""}</div>
-                <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.9, marginBottom: 14 }}>{p.items.map((x, k) => <div key={k}>· {x}</div>)}</div>
-                <Btn small primary={p.hi} onClick={p.act}>{p.cta}</Btn>
-                {(p.hi || p.sub) && <div style={{ fontSize: 10, color: T.faint, marginTop: 8 }}>Demo checkout — connect Stripe in production.</div>}
+              <div key={i} style={{
+                padding: 20, borderRadius: T.radiusLg,
+                background: p.hi ? `linear-gradient(160deg, rgba(16,185,129,0.14), ${T.band2})` : T.band2,
+                border: `1px solid ${p.hi ? "rgba(16,185,129,0.4)" : T.rule}`,
+              }}>
+                <div style={{ fontFamily: T.disp, fontWeight: 800, fontSize: 16, color: p.hi ? T.green : T.ink }}>{p.name}</div>
+                <div style={{ fontFamily: T.mono, fontVariantNumeric: "tabular-nums", fontSize: 24, fontWeight: 800, margin: "8px 0 2px", color: T.ink }}>{p.price}</div>
+                <div style={{ fontSize: 10.5, color: T.green, fontWeight: 700, marginBottom: 10, minHeight: 14 }}>{p.sub || ""}</div>
+                <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.9, marginBottom: 16 }}>{p.items.map((x, k) => <div key={k}>· {x}</div>)}</div>
+                <Btn small primary={p.hi} wide onClick={p.act}>{p.cta}</Btn>
+                {(p.hi || p.sub) && <div style={{ fontSize: 10, color: T.faint, marginTop: 10 }}>Demo checkout — connect Stripe in production.</div>}
               </div>
             ))}
           </div>
@@ -872,69 +901,73 @@ export default function FrontierApp() {
   const Landing = () => (
     <div>
       {/* hero */}
-      <div style={{ borderBottom: `1px solid ${T.rule}`, position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", inset: 0, opacity: 0.3 }}><HeroArt /></div>
-        <div style={{ maxWidth: 1360, margin: "0 auto", padding: "72px 16px 56px", position: "relative" }}>
-          <div style={{ ...label, color: T.green, marginBottom: 14 }}>Portfolio analytics · Three tiers · Two free</div>
-          <h1 style={{ fontFamily: T.disp, fontSize: 46, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.04, margin: "0 0 16px", maxWidth: 660, color: T.ink }}>
+      <div style={{ position: "relative", overflow: "hidden" }}>
+        <HeroArt />
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "96px 20px 72px", position: "relative", textAlign: "center" }}>
+          <div style={{ display: "inline-block", ...label, color: T.green, marginBottom: 20, background: "rgba(16,185,129,0.10)", border: `1px solid rgba(16,185,129,0.28)`, borderRadius: T.pill, padding: "6px 16px" }}>
+            Portfolio analytics · Three tiers · Two free
+          </div>
+          <h1 style={{ fontFamily: T.disp, fontSize: 54, fontWeight: 800, letterSpacing: "-0.03em", lineHeight: 1.06, margin: "0 auto 20px", maxWidth: 760, color: T.ink }}>
             Know exactly what your portfolio is doing.
           </h1>
-          <p style={{ fontSize: 16, color: "#FFFFFF", maxWidth: 540, lineHeight: 1.65, margin: "0 0 26px", textShadow: "0 1px 8px rgba(12,17,22,0.8)" }}>
+          <p style={{ fontSize: 17, color: T.sub, maxWidth: 560, lineHeight: 1.65, margin: "0 auto 34px" }}>
             From a plain-language check-up anyone can read, to the same mean-variance mathematics used on institutional desks. Your assumptions in, honest analysis out.
           </p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Btn primary onClick={() => { setMode("basic"); setView("app"); }}>Check my portfolio — free</Btn>
-            <Btn onClick={() => { setMode("advanced"); setView("app"); }}>Open the full toolkit</Btn>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
+            <Btn primary pill onClick={() => { setMode("basic"); setView("app"); }}>Check my portfolio — free</Btn>
+            <Btn pill onClick={() => { setMode("advanced"); setView("app"); }}>Open the full toolkit</Btn>
           </div>
         </div>
       </div>
 
       {/* live proof band */}
       {base && mc && (
-        <div style={{ background: T.band, borderTop: `1px solid ${T.rule}`, borderBottom: `1px solid ${T.rule}` }}>
-          <div style={{ maxWidth: 1360, margin: "0 auto", padding: "18px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14 }}>
-            {[
-              { l: "Max Sharpe solved", v: num(base.tan.sharpe) },
-              { l: "Frontier points", v: chart ? String(chart.frontier.length) : "—" },
-              { l: "Paths simulated", v: "500" },
-              { l: "Median 10-yr outcome", v: money(mc.median) },
-            ].map((k, i) => (
-              <div key={i}>
-                <div style={{ fontFamily: T.mono, fontVariantNumeric: "tabular-nums", fontSize: 24, fontWeight: 800, color: T.green }}>{k.v}</div>
-                <div style={{ ...label, fontSize: 9, color: T.faint }}>{k.l} · live</div>
-              </div>
-            ))}
-          </div>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 20px 56px", position: "relative" }}>
+          <StatRow cols="repeat(auto-fit, minmax(160px, 1fr))" items={[
+            { l: "Max Sharpe solved · live", v: num(base.tan.sharpe) },
+            { l: "Frontier points · live", v: chart ? String(chart.frontier.length) : "—" },
+            { l: "Paths simulated", v: "500" },
+            { l: "Median 10-yr outcome · live", v: money(mc.median) },
+          ]} />
         </div>
       )}
 
       {/* tiers */}
-      <div style={{ maxWidth: 1360, margin: "0 auto", padding: "48px 16px" }}>
-        <h2 style={{ fontFamily: T.disp, fontSize: 28, fontWeight: 800, margin: "0 0 6px", color: T.ink }}>Built for how much finance you know.</h2>
-        <p style={{ fontSize: 13.5, color: T.sub, margin: "0 0 24px", maxWidth: 560 }}>Never used anything beyond a brokerage app? Start Basic. Comfortable with volatility and correlation? Advanced is the full desk. Both free.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 0, border: `1px solid ${T.rule}` }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px 64px" }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <h2 style={{ fontFamily: T.disp, fontSize: 32, fontWeight: 800, margin: "0 0 10px", color: T.ink }}>Built for how much finance you know.</h2>
+          <p style={{ fontSize: 14.5, color: T.sub, margin: "0 auto", maxWidth: 560 }}>Never used anything beyond a brokerage app? Start Basic. Comfortable with volatility and correlation? Advanced is the full desk. Both free.</p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20 }}>
           {[
             { tier: "Basic", tag: "Free · plain language", d: "Type in what you own and what it's worth. Get a risk grade, a risk-mix breakdown, plain-English flags, and a dollar-figure projection that includes your monthly contributions — no jargon anywhere.", act: () => { setMode("basic"); setView("app"); }, cta: "Start here" },
             { tier: "Advanced", tag: "Free · full mathematics", d: "Tangency and minimum-variance portfolios solved in closed form, the efficient frontier, capital allocation line, Monte Carlo simulation, and six live diagnostics.", act: () => { setMode("advanced"); setView("app"); }, cta: "Open toolkit" },
-            { tier: "Pro", tag: "$14.99/mo · analytical extras", d: "Crisis stress testing, a fully editable correlation lab, long-only optimization, AI observations, and factual news briefs on any holding.", act: () => setShowPaywall(true), cta: "See Pro" },
+            { tier: "Pro", tag: "$14.99/mo · analytical extras", d: "Crisis stress testing, a fully editable correlation lab, long-only optimization, AI observations, and factual news briefs on any holding.", act: () => setShowPaywall(true), cta: "See Pro", hi: true },
           ].map((t, i) => (
-            <div key={i} style={{ padding: 24, borderRight: i < 2 ? `1px solid ${T.rule}` : "none", background: i === 2 ? "#152420" : T.band }}>
-              <div style={{ fontFamily: T.disp, fontSize: 19, fontWeight: 800, color: i === 2 ? T.green : T.ink }}>{t.tier}</div>
-              <div style={{ ...label, fontSize: 9.5, margin: "4px 0 12px" }}>{t.tag}</div>
-              <p style={{ fontSize: 13, color: T.sub, lineHeight: 1.65, margin: "0 0 16px" }}>{t.d}</p>
-              <Btn small primary={i === 2} onClick={t.act}>{t.cta}</Btn>
+            <div key={i} style={{
+              padding: 28, borderRadius: T.radiusLg,
+              background: t.hi ? `linear-gradient(160deg, rgba(16,185,129,0.14), ${T.band})` : T.band,
+              border: `1px solid ${t.hi ? "rgba(16,185,129,0.4)" : T.rule}`,
+              boxShadow: t.hi ? "0 1px 2px rgba(0,0,0,.3), 0 20px 44px -16px rgba(16,185,129,0.35)" : T.shadowSm,
+            }}>
+              <div style={{ fontFamily: T.disp, fontSize: 20, fontWeight: 800, color: t.hi ? T.green : T.ink }}>{t.tier}</div>
+              <div style={{ ...label, fontSize: 9.5, margin: "6px 0 14px" }}>{t.tag}</div>
+              <p style={{ fontSize: 13.5, color: T.sub, lineHeight: 1.65, margin: "0 0 20px" }}>{t.d}</p>
+              <Btn small primary={t.hi} wide onClick={t.act}>{t.cta}</Btn>
             </div>
           ))}
         </div>
       </div>
 
       {/* final CTA */}
-      <div style={{ maxWidth: 1360, margin: "0 auto", padding: "48px 16px 40px", textAlign: "center" }}>
-        <h2 style={{ fontFamily: T.disp, fontSize: 26, fontWeight: 800, margin: "0 0 8px", color: T.ink }}>Sixty seconds to your first read.</h2>
-        <p style={{ fontSize: 13.5, color: T.sub, margin: "0 0 20px" }}>No signup. No card. No jargon unless you ask for it.</p>
-        <Btn primary onClick={() => { setMode("basic"); setView("app"); }}>Check my portfolio</Btn>
-        <div style={{ fontSize: 10.5, color: T.faint, marginTop: 32 }}>
-          Analytical tool only. All outputs are descriptive model results based on user-supplied assumptions, and do not constitute investment advice or recommendations.
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 20px 72px" }}>
+        <div style={{ textAlign: "center", padding: "48px 32px", borderRadius: T.radiusLg, background: `linear-gradient(160deg, rgba(16,185,129,0.12), ${T.band})`, border: `1px solid rgba(16,185,129,0.28)`, boxShadow: T.shadowSm }}>
+          <h2 style={{ fontFamily: T.disp, fontSize: 28, fontWeight: 800, margin: "0 0 10px", color: T.ink }}>Sixty seconds to your first read.</h2>
+          <p style={{ fontSize: 14, color: T.sub, margin: "0 0 24px" }}>No signup. No card. No jargon unless you ask for it.</p>
+          <Btn primary pill onClick={() => { setMode("basic"); setView("app"); }}>Check my portfolio</Btn>
+          <div style={{ fontSize: 10.5, color: T.faint, marginTop: 28, lineHeight: 1.6 }}>
+            Analytical tool only. All outputs are descriptive model results based on user-supplied assumptions, and do not constitute investment advice or recommendations.
+          </div>
         </div>
       </div>
     </div>
@@ -957,7 +990,7 @@ export default function FrontierApp() {
             <span style={{ fontSize: 13, color: T.sub }}>$</span>
             <Field value={h.amount} onChange={(v) => setB(i, "amount", v)} w={86} />
             <select value={h.risk} onChange={(e) => setB(i, "risk", e.target.value)}
-              style={{ padding: "7px 8px", border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontFamily: T.ui, fontSize: 12.5, color: T.ink, background: T.surface }}>
+              style={{ padding: "8px 10px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.ui, fontSize: 12.5, color: T.ink, background: T.surface }}>
               {Object.entries(RISK_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label} — {p.desc}</option>)}
             </select>
             <span onClick={() => rmB(i)} style={{ cursor: "pointer", color: T.faint, fontSize: 14, padding: "0 4px" }}>✕</span>
@@ -971,7 +1004,7 @@ export default function FrontierApp() {
       </Panel>
 
       {!basic && (
-        <div style={{ background: T.goldBg, border: `1px solid ${T.ruleDark}`, padding: "10px 14px", fontSize: 13, color: T.ink }}>
+        <div style={{ background: T.goldBg, border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "12px 16px", fontSize: 13, color: T.ink }}>
           Enter at least one holding with a value above $0 to see your portfolio read.
         </div>
       )}
@@ -995,7 +1028,7 @@ export default function FrontierApp() {
             </div>
             <div style={{ marginBottom: 16 }}>
               <div style={{ ...label, fontSize: 9.5, marginBottom: 6 }}>How the money is split by risk</div>
-              <div style={{ display: "flex", height: 26, overflow: "hidden", border: `1px solid ${T.ruleDark}` }}>
+              <div style={{ display: "flex", height: 26, overflow: "hidden", borderRadius: T.pill, background: T.surface }}>
                 {[["low", T.green, "Steady"], ["med", T.steel, "Balanced"], ["high", T.copper, "Aggressive"]].map(([k, c]) => (
                   basic.mix[k] > 0.001 && <div key={k} style={{ width: pct(basic.mix[k], 1), background: c }} />
                 ))}
@@ -1015,7 +1048,7 @@ export default function FrontierApp() {
                     dataKey="value" innerRadius={48} outerRadius={80} paddingAngle={2} stroke={T.paper} strokeWidth={2}>
                     {bHoldings.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(v) => money(v)} contentStyle={{ background: T.band, border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontSize: 12, color: T.ink }} />
+                  <Tooltip formatter={(v) => money(v)} contentStyle={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusSm, boxShadow: T.shadowSm, padding: "8px 11px", fontSize: 12, color: T.ink }} />
                 </PieChart>
               </ResponsiveContainer>
               <div>
@@ -1033,7 +1066,7 @@ export default function FrontierApp() {
                   Adding $<Field value={bMonthly} onChange={(v) => setBMonthly(Math.max(0, v))} w={64} />/mo
                 </label>
                 <label style={{ fontSize: 12, color: T.sub, display: "flex", gap: 6, alignItems: "center" }}>
-                  Years <Field value={bYears} onChange={(v) => setBYears(Math.max(1, Math.min(40, Math.round(v))))} w={44} />
+                  Years <Field value={bYears} onChange={(v) => setBYears(Math.max(1, Math.min(40, Math.round(v))))} w={56} />
                 </label>
               </div>
             }>
@@ -1051,7 +1084,7 @@ export default function FrontierApp() {
                 <CartesianGrid stroke={T.rule} />
                 <XAxis dataKey="year" tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} />
                 <YAxis tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} tickFormatter={(v) => "$" + (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : Math.round(v / 1000) + "k")} />
-                <Tooltip formatter={(v, name2) => [money(v), { p5: "Rough year (5th pct)", p50: "Middle outcome", p95: "Strong year (95th pct)" }[name2] || name2]} contentStyle={{ background: T.band, border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontSize: 12, color: T.ink }} />
+                <Tooltip formatter={(v, name2) => [money(v), { p5: "Rough year (5th pct)", p50: "Middle outcome", p95: "Strong year (95th pct)" }[name2] || name2]} contentStyle={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusSm, boxShadow: T.shadowSm, padding: "8px 11px", fontSize: 12, color: T.ink }} />
                 <Area type="monotone" dataKey="p95" stroke="none" fill="url(#bband)" />
                 <Area type="monotone" dataKey="p50" stroke={T.green} strokeWidth={2.4} fill="none" />
                 <Area type="monotone" dataKey="p5" stroke={T.copper} strokeWidth={1.4} strokeDasharray="5 4" fill="none" />
@@ -1088,31 +1121,32 @@ export default function FrontierApp() {
   /* ═════════ ADVANCED MODE ═════════ */
   const AdvancedMode = () => (
     <div style={{ maxWidth: 1500, margin: "0 auto", padding: "16px 16px 48px" }}>
-      <div style={{ background: T.paper, border: `1px solid ${T.rule}`, padding: "10px 14px", marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
-        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, color: T.sub }}>
+      <div style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radiusLg, boxShadow: T.shadowSm, padding: "14px 18px", marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center" }}>
+        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8, color: T.sub }}>
           Risk-free <Field value={rf} onChange={setRf} w={52} /> %
         </label>
-        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, color: T.sub }}>
+        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8, color: T.sub }}>
           Risk aversion
           <input type="range" min={1} max={10} step={0.5} value={A} onChange={(e) => setA(parseFloat(e.target.value))} />
           <span style={{ color: T.ink, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{A.toFixed(1)}</span>
         </label>
-        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, color: T.sub }}>
+        <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8, color: T.sub }}>
           <input type="checkbox" checked={longOnly} onChange={(e) => { setLongOnly(e.target.checked); }} />
           Long-only {!isPro && <span style={{ fontSize: 9, fontWeight: 700, color: T.green }}>PRO</span>}
         </label>
         <button onClick={applyInputs} disabled={!dirty} style={{
-          fontFamily: T.ui, fontSize: 12.5, fontWeight: 700, padding: "7px 16px", borderRadius: 3,
+          fontFamily: T.ui, fontSize: 12.5, fontWeight: 700, padding: "8px 18px", borderRadius: T.pill,
           cursor: dirty ? "pointer" : "default",
-          border: `1.5px solid ${dirty ? T.green : T.rule}`,
-          background: dirty ? T.green : "transparent",
-          color: dirty ? "#07130E" : T.faint,
+          border: dirty ? "none" : `1.5px solid ${T.rule}`,
+          background: dirty ? `linear-gradient(180deg, ${T.greenLight}, ${T.green})` : "transparent",
+          color: dirty ? "#04140D" : T.faint,
+          boxShadow: dirty ? "0 4px 14px -4px rgba(16,185,129,0.55)" : "none",
         }}>{dirty ? "Update model ↻" : "Up to date"}</button>
-        <div style={{ display: "flex", gap: 0, marginLeft: "auto", border: `1px solid ${T.ruleDark}` }}>
+        <div style={{ display: "flex", gap: 2, marginLeft: "auto", background: T.surface, borderRadius: T.pill, padding: 3 }}>
           {Object.entries(SCENARIOS).map(([k, s]) => (
             <button key={k}
               onClick={() => { if (k !== "base" && !isPro) { setShowPaywall(true); return; } setScenario(k); }}
-              style={{ fontFamily: T.ui, fontSize: 11.5, fontWeight: 700, padding: "6px 12px", cursor: "pointer", border: "none", borderRight: `1px solid ${T.ruleDark}`, background: scenario === k ? T.green : T.surface, color: scenario === k ? "#07130E" : T.sub }}>
+              style={{ fontFamily: T.ui, fontSize: 11.5, fontWeight: 700, padding: "7px 14px", cursor: "pointer", border: "none", borderRadius: T.pill, background: scenario === k ? T.green : "transparent", color: scenario === k ? "#04140D" : T.sub }}>
               {s.name}
             </button>
           ))}
@@ -1120,7 +1154,7 @@ export default function FrontierApp() {
       </div>
 
       {scen && base && (
-        <div style={{ background: T.goldBg, border: `1px solid ${T.ruleDark}`, padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: T.ink, display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ background: T.goldBg, border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "12px 16px", marginBottom: 16, fontSize: 12.5, color: T.ink, display: "flex", gap: 20, flexWrap: "wrap" }}>
           <span style={{ ...label, color: T.copper }}>{SCENARIOS[scenario].name} vs base</span>
           <span>E[r]: {pct(base.tan.ret)} → <b style={{ color: scen.tan.ret < base.tan.ret ? T.red : T.green }}>{pct(scen.tan.ret)}</b></span>
           <span>σ: {pct(base.tan.sigma)} → <b style={{ color: scen.tan.sigma > base.tan.sigma ? T.red : T.green }}>{pct(scen.tan.sigma)}</b></span>
@@ -1128,7 +1162,7 @@ export default function FrontierApp() {
         </div>
       )}
 
-      <div style={{ background: T.band, border: `1px solid ${T.rule}`, borderLeft: `3px solid ${T.green}`, padding: "12px 16px", marginBottom: 16 }}>
+      <div style={{ background: `linear-gradient(160deg, rgba(16,185,129,0.10), ${T.band})`, border: `1px solid rgba(16,185,129,0.28)`, borderRadius: T.radiusLg, padding: "14px 18px", marginBottom: 16 }}>
         <div style={{ ...label, color: T.green, marginBottom: 6 }}>Three steps</div>
         <div style={{ fontSize: 12.5, color: T.sub, lineHeight: 1.7 }}>
           <b style={{ color: T.ink }}>1.</b> Add your holdings below and press <b style={{ color: T.ink }}>Fetch real σ &amp; ρ</b> to pull live risk data. &nbsp;
@@ -1144,10 +1178,10 @@ export default function FrontierApp() {
         }>
             <Hint>Enter what you own. Type any ticker or company name and pick it from the list. <b>E[r]</b> is the expected yearly return, <b>σ</b> is how much it swings. Press <b>Fetch market data</b> to compute all three inputs from a year of real prices: σ and correlations directly, and E[r] via CAPM (risk-free rate + beta × 5.5% market premium). Every figure stays editable if you disagree with it.</Hint>
         {mktNote && (
-          <div style={{ background: T.band, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: T.sub }}>{mktNote}</div>
+          <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: T.radiusSm, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: T.sub }}>{mktNote}</div>
         )}
         {!base && (
-          <div style={{ background: T.goldBg, border: `1px solid ${T.ruleDark}`, padding: "9px 12px", marginBottom: 12, fontSize: 12.5, color: T.ink }}>
+          <div style={{ background: T.goldBg, border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "11px 14px", marginBottom: 12, fontSize: 12.5, color: T.ink }}>
             The model can't solve with these inputs. This usually means every expected return sits at or below the risk-free rate, so no risky portfolio beats cash. It can also mean a volatility of zero, or a correlation matrix that is internally inconsistent — extreme combinations (e.g. A–B at 0.9, A–C at 0.9, B–C at −0.9) have no valid covariance.
           </div>
         )}
@@ -1190,7 +1224,7 @@ export default function FrontierApp() {
                     dataKey="value" innerRadius={48} outerRadius={80} paddingAngle={2} stroke={T.paper} strokeWidth={2}>
                     {assets.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(v) => pct(v)} contentStyle={{ background: T.band, border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontSize: 12, color: T.ink }} />
+                  <Tooltip formatter={(v) => pct(v)} contentStyle={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusSm, boxShadow: T.shadowSm, padding: "8px 11px", fontSize: 12, color: T.ink }} />
                 </PieChart>
               </ResponsiveContainer>
               <div style={{ ...label, fontSize: 9 }}>Tangency allocation (long weights)</div>
@@ -1201,27 +1235,20 @@ export default function FrontierApp() {
 
       {base && chart && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 0, border: `1px solid ${T.rule}`, borderTop: `3px solid ${T.green}`, marginBottom: 16, background: T.band }}>
-            {[
-              { l: "Tangency E[r]", v: pct(base.tan.ret) },
-              { l: "Tangency σ", v: pct(base.tan.sigma) },
-              { l: "Sharpe", v: num(base.tan.sharpe) },
-              { l: "Min-var σ", v: pct(base.minv.sigma) },
-              { l: `y* (A=${A})`, v: pct(chart.yStar, 0) },
-            ].map((k, i, arr) => (
-              <div key={i} style={{ padding: "12px 14px", borderRight: i < arr.length - 1 ? `1px solid ${T.rule}` : "none" }}>
-                <div style={{ ...label, fontSize: 9 }}>{k.l}</div>
-                <div style={{ fontFamily: T.mono, fontVariantNumeric: "tabular-nums", fontSize: 20, fontWeight: 800, color: T.ink }}>{k.v}</div>
-              </div>
-            ))}
-          </div>
+          <StatRow items={[
+            { l: "Tangency E[r]", v: pct(base.tan.ret) },
+            { l: "Tangency σ", v: pct(base.tan.sigma) },
+            { l: "Sharpe", v: num(base.tan.sharpe) },
+            { l: "Min-var σ", v: pct(base.minv.sigma) },
+            { l: `y* (A=${A})`, v: pct(chart.yStar, 0) },
+          ]} />
 
           <Panel title="Your portfolio vs the optimum">
             {!current ? (<div style={{ fontSize: 12.5, color: T.faint }}>Enter dollar amounts in the You hold $ column above to compare your actual portfolio against the optimum.</div>) : (
               <div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", border: `1px solid ${T.rule}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
                   {[{ l: "Expected return", a: pct(current.ret), b: pct(base.tan.ret) }, { l: "Volatility", a: pct(current.sigma), b: pct(base.tan.sigma) }, { l: "Sharpe ratio", a: num(current.sharpe), b: num(base.tan.sharpe) }].map((k, i) => (
-                    <div key={i} style={{ padding: "12px 14px", borderRight: i < 2 ? `1px solid ${T.rule}` : "none" }}>
+                    <div key={i} style={{ padding: "12px 14px", background: T.surface, borderRadius: T.radiusMd }}>
                       <div style={{ ...label, fontSize: 9, marginBottom: 6 }}>{k.l}</div>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                         <span style={{ fontFamily: T.mono, fontSize: 16, color: T.sub }}>{k.a}</span>
@@ -1230,7 +1257,7 @@ export default function FrontierApp() {
                       </div>
                     </div>))}
                 </div>
-                <div style={{ background: T.band, border: `1px solid ${T.rule}`, borderLeft: `3px solid ${T.green}`, padding: "10px 14px", marginTop: 12, fontSize: 12.5, color: T.ink }}>
+                <div style={{ background: `linear-gradient(160deg, rgba(16,185,129,0.10), ${T.band2})`, border: `1px solid rgba(16,185,129,0.28)`, borderRadius: T.radiusMd, padding: "11px 16px", marginTop: 12, fontSize: 12.5, color: T.ink }}>
                   Your {money(current.tot)} portfolio scores a Sharpe of {num(current.sharpe)} against the model optimum of {num(base.tan.sharpe)}.
                 </div>
               </div>)}
@@ -1254,8 +1281,8 @@ export default function FrontierApp() {
                       <span style={{ fontFamily: T.mono, fontSize: 13, color: T.sub, marginLeft: 10 }}>{money(w * Math.max(1, mcStart))}</span>
                     </span>
                   </div>
-                  <div style={{ height: 14, background: T.surface, border: `1px solid ${T.rule}` }}>
-                    <div style={{ width: barW + "%", height: "100%", background: w < 0 ? T.red : PALETTE[i % PALETTE.length] }} />
+                  <div style={{ height: 14, background: T.surface, borderRadius: T.pill, overflow: "hidden" }}>
+                    <div style={{ width: barW + "%", height: "100%", borderRadius: T.pill, background: w < 0 ? T.red : PALETTE[i % PALETTE.length] }} />
                   </div>
                 </div>
               );
@@ -1272,7 +1299,7 @@ export default function FrontierApp() {
                 <CartesianGrid stroke={T.rule} />
                 <XAxis type="number" dataKey="x" unit="%" domain={[0, "auto"]} tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} />
                 <YAxis type="number" dataKey="y" unit="%" tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} />
-                <Tooltip formatter={(v) => `${Number(v).toFixed(2)}%`} contentStyle={{ background: T.band, border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontSize: 12, color: T.ink }} />
+                <Tooltip formatter={(v) => `${Number(v).toFixed(2)}%`} contentStyle={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusSm, boxShadow: T.shadowSm, padding: "8px 11px", fontSize: 12, color: T.ink }} />
                 <Scatter data={chart.frontier} fill={T.green} line={{ stroke: T.green, strokeWidth: 2 }} shape={() => null} />
                 <Scatter data={chart.cal} fill={T.steel} line={{ stroke: T.steel, strokeWidth: 1.3, strokeDasharray: "5 4" }} shape={() => null} />
                 <Scatter data={chart.assetPts} fill={T.faint} />
@@ -1283,8 +1310,8 @@ export default function FrontierApp() {
             </ResponsiveContainer>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
               {[{ c: T.green, t: "Frontier" }, { c: T.steel, t: "CAL / Tangency" }, { c: T.copper, t: "Min-variance" }, { c: T.ink, t: "Complete portfolio" }, { c: T.faint, t: "Assets" }].map((k, i) => (
-                <span key={i} style={{ fontSize: 11, color: T.sub, display: "flex", alignItems: "center", gap: 5 }}>
-                  <span style={{ width: 9, height: 9, background: k.c }} />{k.t}
+                <span key={i} style={{ fontSize: 11, color: T.sub, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: k.c, display: "inline-block" }} />{k.t}
                 </span>
               ))}
             </div>
@@ -1312,7 +1339,7 @@ export default function FrontierApp() {
                     <CartesianGrid stroke={T.rule} />
                     <XAxis dataKey="year" tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} />
                     <YAxis tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} tickFormatter={(v) => "$" + (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : Math.round(v / 1000) + "k")} />
-                    <Tooltip formatter={(v, name2) => [money(v), { p5: "5th pct", p25: "25th pct", p50: "Median", p75: "75th pct", p95: "95th pct" }[name2] || name2]} contentStyle={{ background: T.band, border: `1px solid ${T.ruleDark}`, borderRadius: 3, fontSize: 12, color: T.ink }} />
+                    <Tooltip formatter={(v, name2) => [money(v), { p5: "5th pct", p25: "25th pct", p50: "Median", p75: "75th pct", p95: "95th pct" }[name2] || name2]} contentStyle={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusSm, boxShadow: T.shadowSm, padding: "8px 11px", fontSize: 12, color: T.ink }} />
                     <Area type="monotone" dataKey="p95" stroke="none" fill="url(#aband)" />
                     <Area type="monotone" dataKey="p75" stroke="none" fill="url(#aband)" />
                     <Area type="monotone" dataKey="p50" stroke={T.green} strokeWidth={2.2} fill="none" />
@@ -1350,11 +1377,11 @@ export default function FrontierApp() {
                         <td style={{ ...td, fontWeight: 700, fontSize: 11.5 }}>{a.name}</td>
                         {assets.map((_, j) => {
                           const v = i === j ? 1 : corr[Math.min(i, j)][Math.max(i, j)];
-                          const heat = i === j ? T.band : v >= 0 ? `rgba(46,189,133,${0.08 + v * 0.38})` : `rgba(76,154,255,${0.08 + Math.abs(v) * 0.38})`;
+                          const heat = i === j ? T.band : v >= 0 ? `rgba(16,185,129,${0.08 + v * 0.38})` : `rgba(96,165,250,${0.08 + Math.abs(v) * 0.38})`;
                           return (
-                            <td key={j} style={{ ...td, padding: 3 }}>
-                              {j < i ? <div style={{ width: 52, height: 30, background: heat, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontVariantNumeric: "tabular-nums", color: T.ink }}>{v.toFixed(2)}</div>
-                                : j === i ? <div style={{ width: 52, height: 30, background: T.band, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.faint }}>1.00</div>
+                            <td key={j} style={{ ...td, padding: 3, borderBottom: "none" }}>
+                              {j < i ? <div style={{ width: 52, height: 30, background: heat, borderRadius: T.radiusSm, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontVariantNumeric: "tabular-nums", color: T.ink }}>{v.toFixed(2)}</div>
+                                : j === i ? <div style={{ width: 52, height: 30, background: T.surface, borderRadius: T.radiusSm, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.faint }}>1.00</div>
                                 : <div style={{ width: 52 }}><Field value={corr[i][j]} onChange={(vv) => setRho(i, j, vv)} w={52} /></div>}
                             </td>
                           );
@@ -1386,7 +1413,7 @@ export default function FrontierApp() {
             <div style={{ fontSize: 12.5, color: T.sub, marginBottom: 10 }}>Recent factual coverage for any holding — descriptive only:</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {assets.map((a, i) => (
-                <button key={i} onClick={() => runBrief(a.name)} style={{ fontFamily: T.ui, fontSize: 12, fontWeight: 700, padding: "7px 14px", borderRadius: 3, cursor: "pointer", border: `1px solid ${T.steel}`, background: "transparent", color: T.steel }}>{a.name} ↗</button>
+                <button key={i} onClick={() => runBrief(a.name)} style={{ fontFamily: T.ui, fontSize: 12, fontWeight: 700, padding: "8px 16px", borderRadius: T.pill, cursor: "pointer", border: `1px solid rgba(96,165,250,0.4)`, background: "rgba(96,165,250,0.08)", color: T.steel }}>{a.name} ↗</button>
               ))}
             </div>
           </Panel>
@@ -1394,7 +1421,7 @@ export default function FrontierApp() {
           <Panel title={`AI observations${!isPro ? " · Pro" : ""}`}
             right={<Btn small primary onClick={runAiInsights}>{aiLoading ? "Analyzing…" : isPro ? "Generate" : "Unlock"}</Btn>} band>
             <Hint>Machine-written notes on what stands out in your inputs and results.</Hint>
-            <div style={{ background: T.paper, border: `1px solid ${T.rule}`, padding: "8px 12px", marginBottom: 14, fontSize: 11.5, color: T.sub, lineHeight: 1.55 }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px 14px", marginBottom: 14, borderRadius: T.radiusSm, fontSize: 11.5, color: T.sub, lineHeight: 1.55 }}>
               <b style={{ color: T.ink }}>Descriptive only.</b> These are machine-generated observations about the model's inputs and outputs — labeled as strengths, considerations, or flags. They are screened by an advice-language filter before display, contain no recommendations, and are not investment advice. Company characteristics beyond the numbers you entered may be imprecise; verify independently.
             </div>
             {aiError && <div style={{ fontSize: 13, color: T.red }}>{aiError} <span onClick={runAiInsights} style={{ color: T.green, fontWeight: 700, cursor: 'pointer', marginLeft: 6 }}>Try again</span></div>}
@@ -1430,34 +1457,37 @@ export default function FrontierApp() {
   /* ═════════ SHELL ═════════ */
   return (
     <div style={{ minHeight: "100vh", background: T.paper, color: T.ink, fontFamily: T.ui }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Mono:wght@500;600&family=Inter:wght@400;500;600;700&display=swap');
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&display=swap');
         input[type=range]{accent-color:${T.green};} input[type=checkbox]{accent-color:${T.green};}
-        select:focus, input:focus{border-color:${T.green} !important;}`}</style>
+        select:focus, input:focus{border-color:${T.green} !important; box-shadow:0 0 0 3px rgba(16,185,129,0.18) !important;}
+        button{font-family:inherit;}
+        @keyframes fxBlob{0%,100%{transform:translate(0,0) scale(1);}33%{transform:translate(30px,-24px) scale(1.06);}66%{transform:translate(-20px,18px) scale(.95);}}
+        .fx-blob{animation-name:fxBlob; animation-timing-function:ease-in-out; animation-iteration-count:infinite;}`}</style>
       {showPaywall && Paywall()}
       {showCheckout && Checkout()}
       {briefTicker && (
-        <div onClick={() => setBriefTicker(null)} style={{ position: "fixed", inset: 0, background: "rgba(6,10,14,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 55, padding: 16 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: T.paper, border: `1px solid ${T.ruleDark}`, borderTop: `4px solid ${T.steel}`, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto", padding: 22 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <div onClick={() => setBriefTicker(null)} style={{ position: "fixed", inset: 0, background: "rgba(3,7,18,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 55, padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radius, boxShadow: T.shadow, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto", padding: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
               <h2 style={{ fontFamily: T.disp, fontSize: 19, fontWeight: 800, margin: 0, color: T.ink }}>
                 {briefTicker} <span style={{ fontSize: 12, fontWeight: 600, color: T.sub }}>· security brief</span>
               </h2>
               <span onClick={() => setBriefTicker(null)} style={{ cursor: "pointer", color: T.faint, fontSize: 15 }}>✕</span>
             </div>
-            <div style={{ fontSize: 11, color: T.faint, marginBottom: 14 }}>Recent coverage, summarized factually. Descriptive only — verify independently.</div>
+            <div style={{ fontSize: 11, color: T.faint, marginBottom: 16 }}>Recent coverage, summarized factually. Descriptive only — verify independently.</div>
             {briefLoading && <div style={{ fontSize: 13, color: T.sub }}>Searching recent coverage…</div>}
             {briefErr && <div style={{ fontSize: 13, color: T.red }}>{briefErr}</div>}
             {briefData && briefData.items.map((it, i) => (
-              <div key={i} style={{ marginBottom: 13, paddingBottom: 13, borderBottom: `1px solid ${T.rule}` }}>
-                <div style={{ marginBottom: 4 }}>
-                  <span style={{ fontFamily: T.ui, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(76,154,255,0.14)", color: T.steel, padding: "3px 8px", borderRadius: 2, marginRight: 8 }}>{it.category}</span>
+              <div key={i} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: i < briefData.items.length - 1 ? `1px solid ${T.rule}` : "none" }}>
+                <div style={{ marginBottom: 5 }}>
+                  <span style={{ fontFamily: T.ui, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", background: "rgba(96,165,250,0.14)", color: T.steel, padding: "4px 10px", borderRadius: T.pill, marginRight: 8 }}>{it.category}</span>
                   <span style={{ fontFamily: T.disp, fontSize: 13.5, fontWeight: 800, color: T.ink }}>{it.title}</span>
                 </div>
                 <div style={{ fontSize: 13, lineHeight: 1.6, color: "#C7D1DB" }}>{it.note}{it.url && <a href={it.url} target="_blank" rel="noreferrer" style={{ color: T.steel, fontWeight: 700, marginLeft: 8, textDecoration: "none" }}>Read article ↗</a>}</div>
               </div>
             ))}
             {briefData && briefData.modelNote && (
-              <div style={{ background: T.band, border: `1px solid ${T.rule}`, padding: "10px 12px", fontSize: 12.5, lineHeight: 1.6, color: T.ink }}>
+              <div style={{ background: "rgba(251,191,36,0.08)", border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "12px 14px", fontSize: 12.5, lineHeight: 1.6, color: T.ink }}>
                 <span style={{ ...label, fontSize: 9, color: T.copper, display: "block", marginBottom: 4 }}>Relevance to your inputs</span>
                 {briefData.modelNote}
               </div>
@@ -1466,29 +1496,29 @@ export default function FrontierApp() {
         </div>
       )}
 
-      <div style={{ borderBottom: `1px solid ${T.ruleDark}`, background: T.paper, position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: 1500, margin: "0 auto", padding: "0 16px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 52 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      <div style={{ borderBottom: `1px solid ${T.rule}`, background: "rgba(3,7,18,0.85)", backdropFilter: "blur(8px)", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ maxWidth: 1500, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 22 }}>
             <span onClick={() => setView("landing")} style={{ fontFamily: T.disp, fontWeight: 800, fontSize: 16, letterSpacing: "0.01em", cursor: "pointer", color: T.ink }}>
               FRONTIER <span style={{ color: T.green }}>X</span>
             </span>
             {view === "app" && (
-              <div style={{ display: "flex", border: `1px solid ${T.ruleDark}` }}>
+              <div style={{ display: "flex", gap: 2, background: T.surface, borderRadius: T.pill, padding: 3 }}>
                 {[["basic", "Basic"], ["advanced", "Advanced"]].map(([m, t]) => (
                   <button key={m} onClick={() => setMode(m)}
-                    style={{ fontFamily: T.ui, fontSize: 12, fontWeight: 700, padding: "5px 14px", cursor: "pointer", border: "none", background: mode === m ? T.green : T.surface, color: mode === m ? "#07130E" : T.sub }}>
+                    style={{ fontFamily: T.ui, fontSize: 12, fontWeight: 700, padding: "6px 16px", cursor: "pointer", border: "none", borderRadius: T.pill, background: mode === m ? T.green : "transparent", color: mode === m ? "#04140D" : T.sub }}>
                     {t}
                   </button>
                 ))}
               </div>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {view === "landing" && <span onClick={() => setView("app")} style={{ fontSize: 12.5, fontWeight: 700, color: T.sub, cursor: "pointer" }}>Workspace</span>}
-            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", color: isAdv ? T.green : T.sub, border: `1px solid ${isAdv ? T.green : T.rule}`, padding: "3px 9px" }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", color: isAdv ? T.green : T.sub, background: isAdv ? "rgba(16,185,129,0.12)" : T.surface, borderRadius: T.pill, padding: "4px 11px" }}>
               {plan.toUpperCase()}
             </span>
-            {!isPro && <Btn small primary onClick={() => setShowPaywall(true)}>Upgrade</Btn>}
+            {!isPro && <Btn small primary pill onClick={() => setShowPaywall(true)}>Upgrade</Btn>}
           </div>
         </div>
       </div>
