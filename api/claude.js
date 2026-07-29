@@ -34,7 +34,7 @@ async function main(req, res) {
   const isCad = (s) => /\.(TO|V|NE|CN)$/i.test(s);
   const weeklyCloses = async (sym) => {
     const r = await tfetch(
-      "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1y&interval=1wk",
+      "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=5y&interval=1wk",
       { headers: { "user-agent": "Mozilla/5.0" } }, 7000
     );
     try {
@@ -92,12 +92,11 @@ async function main(req, res) {
   if (req.method === "GET") {
     const csv = getParam("corr");
     if (csv) {
-      const syms = csv.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 10);
+      const syms = csv.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 30);
       const anyCad = syms.some(isCad), anyUsd = syms.some((x) => !isCad(x));
       const mixed = anyCad && anyUsd;
       const BENCH = mixed ? "XEQT.TO" : (anyCad ? "XIC.TO" : "SPY");
-      const maps = [];
-      for (const s of syms) maps.push(await weeklyCloses(s));
+      const maps = await Promise.all(syms.map((x) => weeklyCloses(x)));
       let fx = null;
       if (mixed) fx = await weeklyCloses("CAD=X");
       if (mixed && fx) {
@@ -163,6 +162,35 @@ async function main(req, res) {
         currency: mixed ? "CAD (USD holdings converted)" : (anyCad ? "CAD" : "USD"),
         missing: syms.filter((s, i) => !ok[i]),
       });
+    }
+    const cap = getParam("capm");
+    if (cap) {
+      const [m, bm] = await Promise.all([weeklyCloses(cap), weeklyCloses(/\.(TO|V|NE|CN)$/i.test(cap) ? "XIC.TO" : "SPY")]);
+      if (!m) return res.status(200).json({ vol: null, beta: null });
+      const ks = Object.keys(m).sort((a, b) => Number(a) - Number(b));
+      const r2 = [];
+      for (let i = 1; i < ks.length; i++) r2.push(Math.log(m[ks[i]] / m[ks[i - 1]]));
+      if (r2.length < 10) return res.status(200).json({ vol: null, beta: null });
+      const sd = stats(r2).sd;
+      const vol = Math.max(5, Math.min(150, Math.round(sd * Math.sqrt(52) * 100)));
+      let beta = null;
+      if (bm) {
+        const common = ks.filter((k) => bm[k] != null);
+        if (common.length > 12) {
+          const ra = [], rb = [];
+          for (let i = 1; i < common.length; i++) {
+            ra.push(Math.log(m[common[i]] / m[common[i - 1]]));
+            rb.push(Math.log(bm[common[i]] / bm[common[i - 1]]));
+          }
+          const sa = stats(ra), sb = stats(rb);
+          let cov = 0;
+          for (let k = 0; k < ra.length; k++) cov += (ra[k] - sa.mean) * (rb[k] - sb.mean);
+          cov /= (ra.length - 1);
+          const b = cov / sb.varr;
+          if (isFinite(b)) beta = Math.round(Math.max(-1, Math.min(4, b)) * 100) / 100;
+        }
+      }
+      return res.status(200).json({ vol, beta });
     }
     const q = getParam("search");
     if (q) {

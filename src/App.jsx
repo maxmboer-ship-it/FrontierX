@@ -337,16 +337,17 @@ function TickerInput({ value, onChange, onSelect, width = 130, bold = true }) {
   };
   const pick = async (r) => {
     setOpen(false);
-    if (r.vol != null) { onSelect(r); return; }
     setFetching(true);
-    let vol = 30;
+    let vol = r.vol != null ? r.vol : 30;
+    let beta = null;
     try {
-      const resp = await fetch("/api/claude?vol=" + encodeURIComponent(r.t));
+      const resp = await fetch("/api/claude?capm=" + encodeURIComponent(r.t));
       const data = await resp.json();
       if (data.vol) vol = data.vol;
+      if (typeof data.beta === "number") beta = data.beta;
     } catch (e) {}
     setFetching(false);
-    onSelect({ ...r, vol });
+    onSelect({ ...r, vol, beta });
   };
   const DROP_H = 236;
   const flipUp = rect && window.innerHeight - rect.bottom < DROP_H && rect.top > DROP_H;
@@ -710,7 +711,7 @@ export default function FrontierApp() {
     setCorr(c);
   };
   const addAsset = () => {
-    if (n >= 10) return;
+    if (n >= 30) return;
     setAssets([...assets, { name: `ASSET${n + 1}`, er: 8, sigma: 20, amount: 1000 }]);
     const c = corr.map((r) => [...r, 0.35]);
     c.push(Array(n + 1).fill(0.35)); c[n][n] = 1;
@@ -1137,8 +1138,8 @@ export default function FrontierApp() {
       </div>
       <Panel title="Capital market assumptions & solved weights"
         right={
-          n >= 10
-            ? <span style={{ fontSize: 11.5, color: T.faint }}>10 asset maximum</span>
+          n >= 30
+            ? <span style={{ fontSize: 11.5, color: T.faint }}>30 asset maximum</span>
             : <span style={{ display: "flex", gap: 8 }}><Btn small primary onClick={fetchMarketData}>{mktLoading ? "Fetching…" : "Fetch market data"}</Btn><Btn small onClick={addAsset}>+ Add asset</Btn></span>
         }>
             <Hint>Enter what you own. Type any ticker or company name and pick it from the list. <b>E[r]</b> is the expected yearly return, <b>σ</b> is how much it swings. Press <b>Fetch market data</b> to compute all three inputs from a year of real prices: σ and correlations directly, and E[r] via CAPM (risk-free rate + beta × 5.5% market premium). Every figure stays editable if you disagree with it.</Hint>
@@ -1164,7 +1165,7 @@ export default function FrontierApp() {
                       <span style={{ width: 8, height: 8, background: PALETTE[i % PALETTE.length], display: "inline-block", marginRight: 8 }} />
                       <TickerInput value={a.name} width={112}
                         onChange={(v) => setAsset(i, "name", v.toUpperCase())}
-                        onSelect={(r) => setAssets(assets.map((x, k) => (k === i ? { ...x, name: r.t, er: erFromVol(r.vol), sigma: r.vol } : x)))} />
+                        onSelect={(r) => setAssets(assets.map((x, k) => (k === i ? { ...x, name: r.t, er: typeof r.beta === "number" ? Math.round((rf + r.beta * 5.5) * 10) / 10 : erFromVol(r.vol), sigma: r.vol } : x)))} />
                     </td>
                     <td style={{ ...td, textAlign: "right" }}><Field value={a.amount == null ? 0 : a.amount} onChange={(v) => setAsset(i, "amount", v)} w={72} /></td>
 <td style={{ ...td, textAlign: "right" }}><Field value={a.er} onChange={(v) => setAsset(i, "er", v)} w={50} /></td>
