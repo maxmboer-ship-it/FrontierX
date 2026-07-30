@@ -829,7 +829,7 @@ function deriveDefaults(fund, hist, rf, mrp) {
    so the levered and unlevered answers are internally consistent. */
 function runDCF(a) {
   if (!a || !isFinite(a.rev0) || a.rev0 <= 0 || !isFinite(a.shares) || a.shares <= 0) return null;
-  const yrs = Math.max(1, Math.min(15, Math.round(a.years)));
+  const yrs = Math.max(1, Math.min(30, Math.round(a.years)));
   const rows = [];
   let rev = a.rev0, debt = a.debt || 0;
   for (let t = 1; t <= yrs; t++) {
@@ -2100,7 +2100,6 @@ function FrontierApp() {
                           {[
                             { k: "growth", l: "Revenue growth, yr 1", pct: true },
                             { k: "tg", l: "Terminal growth", pct: true },
-                            { k: "years", l: "Explicit period (years)", pct: false, int: true },
                             { k: "ebitMargin", l: "Operating (EBIT) margin", pct: true },
                             { k: "taxRate", l: "Tax rate", pct: true },
                             { k: "daPct", l: "D&A, % of revenue", pct: true },
@@ -2165,6 +2164,33 @@ function FrontierApp() {
                             </div>
                           );
                         })()}
+
+                        {/* ── projection horizon ── */}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+                          <span style={{ ...label, fontSize: 9.5 }}>Project out</span>
+                          {[5, 10, 15, 20].map((y) => (
+                            <button key={y} onClick={() => setValOv({ ...valOv, years: y })}
+                              style={{
+                                fontFamily: T.ui, fontSize: 11.5, fontWeight: 700, padding: "6px 14px", borderRadius: T.pill, cursor: "pointer",
+                                border: `1px solid ${val.asm.years === y ? T.green : T.ruleDark}`,
+                                background: val.asm.years === y ? "rgba(16,185,129,0.12)" : "transparent",
+                                color: val.asm.years === y ? T.green : T.sub,
+                              }}>{y} years</button>
+                          ))}
+                          <span style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
+                            <span style={{ fontSize: 11.5, color: T.faint }}>or</span>
+                            <Field value={val.asm.years} w={56}
+                              onChange={(v2) => setValOv({ ...valOv, years: Math.max(1, Math.min(30, Math.round(v2))) })} />
+                            <span style={{ fontSize: 11.5, color: T.faint }}>years (1–30)</span>
+                          </span>
+                          {valOv.years != null && (
+                            <button onClick={() => { const n2 = { ...valOv }; delete n2.years; setValOv(n2); }}
+                              style={{ background: "none", border: "none", color: T.faint, fontSize: 10.5, cursor: "pointer", textDecoration: "underline" }}>reset to 10</button>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 18, lineHeight: 1.6 }}>
+                          How many years are forecast explicitly before the terminal value takes over. A longer horizon shifts weight out of the perpetuity and into the forecast — it does not make the answer more certain, it moves where the uncertainty sits. Growth fades to the terminal rate across whatever window you pick.
+                        </div>
 
                         {/* ── terminal value method ── */}
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
