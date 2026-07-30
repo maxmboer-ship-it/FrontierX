@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { track } from "@vercel/analytics";
 import * as math from "mathjs";
 import {
   Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -458,6 +459,7 @@ const T = {
   sage: "#7C9A8E",         // secondary accent
   steel: "#60A5FA",        // chart / info accent
   copper: "#FBBF24",       // amber highlight
+  pink: "#F472B6",         // "you are here" — reserved for the user's own portfolio
   red: "#F87171",          // down / negative
   goldBg: "rgba(251,191,36,0.09)",
   goldBorder: "rgba(251,191,36,0.32)",
@@ -576,6 +578,18 @@ function HeroArt() {
     </div>
   );
 }
+/* Recharts Scatter shape: a dot with a soft halo, so the two points that matter
+   most (where you are, where you'd be) read above the frontier's own markers. */
+const haloDot = (fill, r = 8) => (props) => {
+  const { cx, cy } = props || {};
+  if (!isFinite(cx) || !isFinite(cy)) return null;
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <circle cx={cx} cy={cy} r={r + 5} fill={fill} opacity={0.22} />
+      <circle cx={cx} cy={cy} r={r} fill={fill} stroke={T.paper} strokeWidth={2.5} />
+    </g>
+  );
+};
 function TypeBadge({ type }) {
   const map = {
     strength: { t: "Strength", bg: "rgba(16,185,129,0.14)", c: T.green },
@@ -608,6 +622,9 @@ const SCENARIOS = {
 
 /* ═══════════════ APP ═══════════════ */
 
+/* Analytics: never let a blocked/absent tracker throw into React. */
+const ev = (name, props) => { try { track(name, props); } catch (e) {} };
+
 function FrontierApp() {
   const [view, setView] = useState("landing");
   const [mode, setMode] = useState("basic"); // basic | advanced
@@ -620,10 +637,16 @@ function FrontierApp() {
       if (k && FRIEND_KEYS.indexOf(k.toUpperCase()) >= 0) setPlan("pro");
     } catch (e) {}
   }, []);
+  // One event per screen the visitor actually lands on, so the funnel
+  // landing → basic/advanced → paywall → checkout is visible in Vercel.
+  React.useEffect(() => {
+    ev("screen", { screen: view === "app" ? "app:" + mode : view, plan });
+  }, [view, mode, plan]);
   const [mktLoading, setMktLoading] = useState(false);
   const [mktNote, setMktNote] = useState(null);
   const fetchMarketData = async () => {
     setMktLoading(true); setMktNote(null);
+    ev("market_data_fetch", { assets: assets.length });
     try {
       const syms = assets.map((a) => a.name).join(",");
       const r = await fetch("/api/claude?corr=" + encodeURIComponent(syms));
@@ -663,6 +686,8 @@ function FrontierApp() {
   const [ckCvc, setCkCvc] = useState("");
   const [ckErr, setCkErr] = useState(null);
   const [trialEnds, setTrialEnds] = useState(null);
+  React.useEffect(() => { if (showPaywall) ev("paywall_opened", { plan }); }, [showPaywall, plan]);
+  React.useEffect(() => { if (showCheckout) ev("checkout_opened", { tier: String(showCheckout) }); }, [showCheckout]);
 
   // basic-mode state — restored from the same saved book (it was persisted but
   // never read back, so Basic mode always reset to empty on reload).
@@ -702,6 +727,10 @@ function FrontierApp() {
   const n = assets.length;
   const isPro = plan === "pro";
   const isAdv = plan !== "free"; // advanced trial or pro
+  // Position along the frontier: w(t) = t·wTangency + (1−t)·wMinVar.
+  // 0 = minimum variance, 1 = maximum Sharpe. Same parameterization the
+  // frontier curve itself is drawn from, so the marker always sits on the line.
+  const [frontierT, setFrontierT] = useState(1);
 
   React.useEffect(() => {
     try { localStorage.setItem("fx_book", JSON.stringify({ assets, corr, rf, A, bHoldings })); } catch (e) {}
@@ -769,6 +798,28 @@ function FrontierApp() {
     const sh = (pp.ret - base.rfd) / pp.sigma;
     return { w, tot, ret: pp.ret, sigma: pp.sigma, sharpe: sh, gap: base.tan.sharpe - sh };
   }, [base, rev]);
+
+  /* The point on the frontier the user has selected, plus the weight changes
+     that separate it from what they actually hold. Purely a comparison of two
+     weightings — no transaction sizing, to stay inside the app's descriptive-only
+     framing. */
+  const tBounds = longOnly ? [0, 1] : [-1.2, 2.6];
+  const tClamped = Math.max(tBounds[0], Math.min(tBounds[1], frontierT));
+  const target = useMemo(() => {
+    if (!base) return null;
+    const { tan, minv, mu, S, rfd } = base;
+    const w = tan.w.map((wi, i) => tClamped * wi + (1 - tClamped) * minv.w[i]);
+    const p = portStats(w, mu, S);
+    if (!isFinite(p.ret) || !isFinite(p.sigma) || p.sigma <= 0) return null;
+    return {
+      w, ret: p.ret, sigma: p.sigma,
+      sharpe: (p.ret - rfd) / p.sigma,
+      deltas: current ? w.map((tw, i) => {
+        const cw = current.w[i];
+        return { i, from: cw, to: tw, dw: tw - cw, dollars: (tw - cw) * current.tot };
+      }) : null,
+    };
+  }, [base, tClamped, current, rev]);
 
   const qInsights = useMemo(
     () => (base ? quantInsights(assets, corr, { tan: base.tan }, rf / 100, A) : []),
@@ -910,6 +961,7 @@ function FrontierApp() {
       const ends = new Date(Date.now() + 14 * 24 * 3600 * 1000);
       setTrialEnds(ends.toLocaleDateString(undefined, { month: "short", day: "numeric" }));
     }
+    ev("plan_activated", { tier: String(tier) });
     setPlan(tier);
     if (tier === "advanced") setMode("advanced");
     setShowCheckout(null); setView("app");
@@ -1374,9 +1426,9 @@ function FrontierApp() {
             </div>
           </Panel>
 
-          <Panel title="Efficient frontier · Capital allocation line">
-            <Hint>Every dot is a possible portfolio: risk across the bottom, expected return up the side. The curve is the best return available at each level of risk.</Hint>
-            <ResponsiveContainer width="100%" height={300}>
+          <Panel title="Efficient frontier · Where you sit">
+            <Hint>Every dot is a possible portfolio: risk across the bottom, expected return up the side. The curve is the best return available at each level of risk. Your portfolio is marked in pink; drag the slider below to pick any point on the curve and see which weights differ.</Hint>
+            <ResponsiveContainer width="100%" height={330}>
               <ComposedChart margin={{ top: 8, right: 16, bottom: 6, left: -6 }}>
                 <CartesianGrid stroke={T.rule} />
                 <XAxis type="number" dataKey="x" unit="%" domain={[0, "auto"]} tick={{ fontSize: 11, fill: T.sub }} stroke={T.ruleDark} />
@@ -1385,18 +1437,139 @@ function FrontierApp() {
                 <Scatter data={chart.frontier} fill={T.green} line={{ stroke: T.green, strokeWidth: 2 }} shape={() => null} />
                 <Scatter data={chart.cal} fill={T.steel} line={{ stroke: T.steel, strokeWidth: 1.3, strokeDasharray: "5 4" }} shape={() => null} />
                 <Scatter data={chart.assetPts} fill={T.faint} />
-                <Scatter data={[{ x: base.tan.sigma * 100, y: base.tan.ret * 100 }]} fill={T.steel} />
                 <Scatter data={[{ x: base.minv.sigma * 100, y: base.minv.ret * 100 }]} fill={T.copper} />
                 <Scatter data={[{ x: chart.complete.sigma * 100, y: chart.complete.ret * 100 }]} fill={T.ink} />
+                {/* the move: dashed connector from where you are to the selected point */}
+                {current && target && (
+                  <Scatter
+                    data={[
+                      { x: current.sigma * 100, y: current.ret * 100 },
+                      { x: target.sigma * 100, y: target.ret * 100 },
+                    ]}
+                    fill="none"
+                    line={{ stroke: T.sub, strokeWidth: 1.2, strokeDasharray: "3 4" }}
+                    shape={() => null}
+                  />
+                )}
+                {/* selected target — emphasised */}
+                {target && (
+                  <Scatter data={[{ x: target.sigma * 100, y: target.ret * 100 }]} fill={T.green} shape={haloDot(T.green, 8)} />
+                )}
+                {/* your actual portfolio — emphasised */}
+                {current && (
+                  <Scatter data={[{ x: current.sigma * 100, y: current.ret * 100 }]} fill={T.pink} shape={haloDot(T.pink, 8)} />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
-              {[{ c: T.green, t: "Frontier" }, { c: T.steel, t: "CAL / Tangency" }, { c: T.copper, t: "Min-variance" }, { c: T.ink, t: "Complete portfolio" }, { c: T.faint, t: "Assets" }].map((k, i) => (
-                <span key={i} style={{ fontSize: 11, color: T.sub, display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: k.c, display: "inline-block" }} />{k.t}
+              {[
+                ...(current ? [{ c: T.pink, t: "Your portfolio", big: true }] : []),
+                { c: T.green, t: "Selected point on frontier", big: true },
+                { c: T.green, t: "Frontier" },
+                { c: T.steel, t: "CAL" },
+                { c: T.copper, t: "Min-variance" },
+                { c: T.ink, t: "Complete portfolio" },
+                { c: T.faint, t: "Assets" },
+              ].map((k, i) => (
+                <span key={i} style={{ fontSize: 11, color: k.big ? T.ink : T.sub, fontWeight: k.big ? 700 : 400, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: k.big ? 11 : 9, height: k.big ? 11 : 9, borderRadius: "50%", background: k.c, display: "inline-block", boxShadow: k.big ? `0 0 0 3px ${k.c}33` : "none" }} />{k.t}
                 </span>
               ))}
             </div>
+
+            {!current && (
+              <div style={{ background: T.goldBg, border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "11px 14px", marginTop: 16, fontSize: 12.5, color: T.ink }}>
+                Enter dollar amounts in the <b>You hold $</b> column above to plot your own portfolio on this chart and see how its weights differ from any point on the curve.
+              </div>
+            )}
+
+            {/* ---- frontier position selector ---- */}
+            {target && (
+              <div style={{ marginTop: 20, borderTop: `1px solid ${T.rule}`, paddingTop: 18 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                  <span style={{ ...label, color: T.ink }}>Pick a point on the frontier</span>
+                  <span style={{ display: "flex", gap: 6 }}>
+                    <Btn small onClick={() => setFrontierT(0)}>Min risk</Btn>
+                    <Btn small onClick={() => setFrontierT(1)}>Max Sharpe</Btn>
+                  </span>
+                </div>
+                <input type="range" min={tBounds[0]} max={tBounds[1]} step={0.01} value={tClamped}
+                  onChange={(e) => setFrontierT(parseFloat(e.target.value))}
+                  style={{ width: "100%", accentColor: T.green }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: T.faint, marginBottom: 16 }}>
+                  <span>Lower risk · minimum variance</span>
+                  <span>Higher risk / return{!longOnly ? " · leveraged" : ""}</span>
+                </div>
+
+                <StatRow cols="repeat(auto-fit, minmax(130px, 1fr))" items={[
+                  { l: "Selected E[r]", v: pct(target.ret), c: T.green },
+                  { l: "Selected σ", v: pct(target.sigma), c: T.green },
+                  { l: "Selected Sharpe", v: num(target.sharpe), c: T.green },
+                  ...(current ? [
+                    { l: "Your E[r] → change", v: pct(target.ret - current.ret), c: target.ret >= current.ret ? T.green : T.red },
+                    { l: "Your σ → change", v: pct(target.sigma - current.sigma), c: target.sigma <= current.sigma ? T.green : T.red },
+                  ] : []),
+                ]} />
+
+                {target.deltas && (
+                  <>
+                    <div style={{ ...label, color: T.ink, marginBottom: 10 }}>Weight differences vs what you hold</div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 460 }}>
+                        <thead><tr>
+                          <th style={th}>Security</th>
+                          <th style={thNum}>You hold</th>
+                          <th style={thNum}>Selected</th>
+                          <th style={thNum}>Difference</th>
+                          <th style={thNum}>In dollars</th>
+                          <th style={{ ...th, width: 130 }}></th>
+                        </tr></thead>
+                        <tbody>
+                          {target.deltas.map((d) => {
+                            const maxAbs = Math.max.apply(null, target.deltas.map((x) => Math.abs(x.dw))) || 1;
+                            const barPct = (Math.abs(d.dw) / maxAbs) * 50; // half-width each side
+                            const up = d.dw >= 0;
+                            return (
+                              <tr key={d.i}>
+                                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: PALETTE[d.i % PALETTE.length], display: "inline-block", marginRight: 8 }} />
+                                  {assets[d.i] ? assets[d.i].name : "—"}
+                                </td>
+                                <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", color: T.sub }}>{pct(d.from)}</td>
+                                <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{pct(d.to)}</td>
+                                <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: Math.abs(d.dw) < 0.0005 ? T.faint : up ? T.green : T.red }}>
+                                  {Math.abs(d.dw) < 0.0005 ? "—" : (up ? "+" : "") + (d.dw * 100).toFixed(1) + "pp"}
+                                </td>
+                                <td style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", color: Math.abs(d.dollars) < 1 ? T.faint : up ? T.green : T.red }}>
+                                  {Math.abs(d.dollars) < 1 ? "—" : (up ? "+" : "−") + money(Math.abs(d.dollars))}
+                                </td>
+                                <td style={{ ...td, padding: "8px 10px" }}>
+                                  {/* diverging bar, centred: left = lower weight, right = higher */}
+                                  <div style={{ position: "relative", height: 8, background: T.surface, borderRadius: T.pill }}>
+                                    <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: T.ruleDark }} />
+                                    <div style={{
+                                      position: "absolute", top: 0, bottom: 0, borderRadius: T.pill,
+                                      background: up ? T.green : T.red,
+                                      left: up ? "50%" : `${50 - barPct}%`,
+                                      width: `${barPct}%`,
+                                    }} />
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ fontSize: 11, color: T.faint, marginTop: 10, lineHeight: 1.6 }}>
+                      A descriptive comparison of two weightings at a fixed portfolio value of {money(current.tot)} — it shows how the
+                      two allocations differ, not a recommendation to transact. Dollar figures ignore trading costs, taxes, and
+                      minimum lot sizes.
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </Panel>
 
           <Panel title="Monte Carlo wealth simulation · 500 paths"
