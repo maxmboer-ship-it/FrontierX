@@ -706,29 +706,79 @@ function deriveDefaults(fund, hist, rf, mrp) {
   const ratio = (f) => avgOf(tail.map((h) => (h.rev > 0 ? f(h) / h.rev : NaN)));
   const clamp = (v, lo, hi, dflt) => (isFinite(v) ? Math.max(lo, Math.min(hi, v)) : dflt);
 
-  // Revenue CAGR across the reported window.
+  // Revenue growth, measured three ways. A single CAGR anchored on whatever
+  // year the feed happens to start with is not enough — 2022 was a cyclical
+  // peak for energy and a COVID peak for vaccine makers, and anchoring there
+  // extrapolates a decline forever. The panel shows all three and says which
+  // one it used.
   let cagr = NaN;
   const first = hist.find((h) => h.rev > 0);
   if (first && last.rev > 0 && last.year > first.year) {
     cagr = Math.pow(last.rev / first.rev, 1 / (last.year - first.year)) - 1;
   }
+  const yoyAll = [];
+  for (let i = 1; i < n; i++) {
+    if (hist[i - 1].rev > 0 && hist[i].rev > 0) yoyAll.push(hist[i].rev / hist[i - 1].rev - 1);
+  }
+  const yoyLatest = yoyAll.length ? yoyAll[yoyAll.length - 1] : NaN;
+  const yoyMedian = medOf(yoyAll);
+  // Take the middle of three measures rather than trusting any one of them.
+  // A CAGR is hostage to whichever year the feed starts with (2022 was a
+  // cyclical peak for energy and a COVID peak for vaccine makers); the latest
+  // year-over-year is hostage to one year; the median ignores a real trend.
+  // The median of the three is robust to any single one being distorted.
+  const measures = [cagr, yoyLatest, yoyMedian].filter(isFinite);
+  const chosen = medOf(measures);
+  const spread = measures.length > 1 ? Math.max(...measures) - Math.min(...measures) : 0;
+  const measuresDisagree = spread > 0.10;
+  const growthClamped = isFinite(chosen) && (chosen > 0.45 || chosen < -0.15);
 
-  const taxRate = clamp(avgOf(tail.map((h) => h.taxRate)), 0.05, 0.45, 0.21);
+  // Effective rates swing wildly on one-off credits and settlements. A rate
+  // outside a plausible band says more about a single year's tax accounting
+  // than about the cash taxes a going concern will pay, so fall back to the
+  // statutory rate rather than discounting a 5%-taxed company forever.
+  const STATUTORY_TAX = 0.21;
+  const effTax = avgOf(tail.map((h) => h.taxRate));
+  const taxImplausible = !isFinite(effTax) || effTax < 0.10 || effTax > 0.45;
+  const taxRate = taxImplausible ? STATUTORY_TAX : effTax;
+
   const debt = fin(last.debt, fin(q.totalDebt, 0)) || 0;
   const cash = fin(last.cash, fin(q.totalCash, 0)) || 0;
   const shares = fin(q.shares, fin(last.shares, null));
-  const beta = clamp(fin(q.beta), 0.1, 3, 1);
+
+  // Raw historical betas are noisy and mean-revert toward the market. Applying
+  // the standard Blume 2/3–1/3 adjustment (what Bloomberg publishes as
+  // "adjusted beta") stops a low trailing beta from producing a 4% WACC on a
+  // large-cap — Exxon's raw beta prints at 0.16, which no desk would use.
+  const betaRaw = clamp(fin(q.beta), -0.5, 4, 1);
+  const beta = 0.67 * betaRaw + 0.33;
 
   // Cost of debt from what the company actually pays, not a guess.
   const kdRaw = avgOf(tail.map((h) => (h.interest && h.debt > 0 ? h.interest / h.debt : NaN)));
   const kd = clamp(kdRaw, 0.01, 0.15, 0.05);
-  const ke = rf / 100 + beta * (mrp / 100);
+
+  // A single-factor CAPM hands back a 4–5% cost of equity for low-beta names
+  // (Exxon's trailing beta is genuinely ~0.2 over this window), which is below
+  // what any practitioner would use to discount equity. Floor the equity risk
+  // contribution at 300bp over the risk-free rate, and floor the blended WACC
+  // at 6%. Both are disclosed in the panel and both remain editable.
+  const KE_FLOOR_SPREAD = 0.03, WACC_FLOOR = 0.06;
+  const keRaw = rf / 100 + beta * (mrp / 100);
+  const keFloorVal = rf / 100 + KE_FLOOR_SPREAD;
+  const keFloored = keRaw < keFloorVal;
+  const ke = Math.max(keRaw, keFloorVal);
+
   const mcap = fin(q.marketCap, shares && fund.price ? shares * fund.price : null);
   const E = mcap || 0, D = debt;
-  const wacc = E + D > 0 ? (E / (E + D)) * ke + (D / (E + D)) * kd * (1 - taxRate) : ke;
+  const waccRaw = E + D > 0 ? (E / (E + D)) * ke + (D / (E + D)) * kd * (1 - taxRate) : ke;
+  const waccFloored = waccRaw < WACC_FLOOR;
+  const wacc = Math.max(waccRaw, WACC_FLOOR);
 
   return {
-    growth: clamp(cagr, -0.15, 0.45, 0.05),
+    growth: clamp(chosen, -0.15, 0.45, 0.05),
+    growthCagr: cagr, growthYoyLatest: yoyLatest, growthYoyMedian: yoyMedian,
+    growthClamped, measuresDisagree, spread,
+    periods: n, taxImplausible, effTax, betaRaw, keFloored, waccFloored, keRaw, waccRaw,
     tg: 0.025,
     years: 10, // standard explicit period; short horizons load too much onto terminal value
     ebitMargin: clamp(ratio((h) => h.ebit), -0.5, 0.75, 0.15),
@@ -2019,9 +2069,30 @@ function FrontierApp() {
                             );
                           })}
                         </div>
-                        <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 18, lineHeight: 1.6 }}>
+                        <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 12, lineHeight: 1.6 }}>
                           Growth fades in a straight line from year 1 to the terminal rate. Working capital is applied to the <em>change</em> in revenue, so a negative figure means growth releases cash. WACC blends a CAPM cost of equity (β {num(val.asm.beta)} against a 5.5% market risk premium and your {num(rf, 1)}% risk-free rate) with an after-tax cost of debt of {(val.asm.kd * 100).toFixed(2)}% taken from interest actually paid.
                         </div>
+
+                        {/* ── how the defaults were arrived at, and where they were overridden ── */}
+                        {(() => {
+                          const d0 = val.defs, notes = [];
+                          notes.push(`Growth default is the middle of three measures, so no single distorted year drives it — reported CAGR ${pct(d0.growthCagr)}, latest year-over-year ${pct(d0.growthYoyLatest)}, median year-over-year ${pct(d0.growthYoyMedian)}.`);
+                          if (d0.measuresDisagree) notes.push(`Those three measures span ${pct(d0.spread)}, so growth has not been steady — the starting year matters a great deal here and this default deserves a second look.`);
+                          if (d0.growthClamped) notes.push(`That figure was capped into a −15% to +45% band before use; the raw measure was ${pct(d0.growthCagr)}. Nothing is underwritten at triple-digit growth in perpetuity.`);
+                          if (d0.periods <= 4) notes.push(`Only ${d0.periods} annual periods are published through this feed, so every trend here rests on ${d0.periods - 1} year-over-year observations. Treat the growth default as a starting point, not a forecast.`);
+                          if (d0.taxImplausible) notes.push(`The effective tax rate in the filings works out to ${isFinite(d0.effTax) ? pct(d0.effTax) : "an unusable figure"} — distorted by one-off credits or losses — so the 21% statutory rate was used instead.`);
+                          if (Math.abs(d0.betaRaw - d0.beta) > 0.02) notes.push(`Beta was adjusted from a raw ${num(d0.betaRaw)} to ${num(d0.beta)} using the standard two-thirds/one-third pull toward 1.0, since trailing betas are noisy and mean-revert.`);
+                          if (d0.keFloored) notes.push(`CAPM returned a ${pct(d0.keRaw)} cost of equity off that beta, which is too close to the risk-free rate to discount equity with. It was floored at ${num(rf, 1)}% + 300bp.`);
+                          if (d0.waccFloored) notes.push(`The blended WACC came to ${pct(d0.waccRaw)} and was floored at 6.0%.`);
+                          return (
+                            <div style={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, padding: "12px 14px", marginBottom: 18 }}>
+                              <div style={{ ...label, fontSize: 9, marginBottom: 7, color: T.copper }}>How these defaults were set</div>
+                              {notes.map((nt, i) => (
+                                <div key={i} style={{ fontSize: 11.5, color: "#C7D1DB", lineHeight: 1.6, marginBottom: i < notes.length - 1 ? 5 : 0 }}>· {nt}</div>
+                              ))}
+                            </div>
+                          );
+                        })()}
 
                         {/* ── terminal value method ── */}
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
