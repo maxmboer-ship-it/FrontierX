@@ -934,6 +934,8 @@ function FrontierApp() {
   }, [view, mode, plan]);
   const [mktLoading, setMktLoading] = useState(false);
   const [mktNote, setMktNote] = useState(null);
+  // n×n flags: which correlations were actually measured vs still placeholder.
+  const [corrReal, setCorrReal] = useState(null);
   const fetchMarketData = async () => {
     setMktLoading(true); setMktNote(null);
     ev("market_data_fetch", { assets: assets.length });
@@ -949,14 +951,22 @@ function FrontierApp() {
         return next;
       }));
       if (d.corr) {
-        const c = corr.map((row) => [...row]);
-        for (let i = 0; i < assets.length; i++) {
-          for (let j = i + 1; j < assets.length; j++) {
+        const n = assets.length;
+        const c = normalizeCorr(corr, n);
+        // Track which pairs came back with real data so the placeholders that
+        // remain can be marked rather than passing as measured correlations.
+        const real = Array.from({ length: n }, () => Array(n).fill(false));
+        for (let i = 0; i < n; i++) {
+          for (let j = i + 1; j < n; j++) {
             const v = d.corr[i] && d.corr[i][j];
-            if (typeof v === "number" && isFinite(v)) c[i][j] = Math.round(v * 100) / 100;
+            if (typeof v === "number" && isFinite(v)) {
+              c[i][j] = Math.round(v * 100) / 100;
+              real[i][j] = true; real[j][i] = true;
+            }
           }
         }
         setCorr(c);
+        setCorrReal(real);
       }
       const miss = (d.missing && d.missing.length) ? " No data for: " + d.missing.join(", ") + "." : "";
       const bl = (d.betas && d.betas.some((b) => typeof b === "number"))
@@ -1053,6 +1063,21 @@ function FrontierApp() {
   React.useEffect(() => {
     try { localStorage.setItem("fx_book", JSON.stringify({ assets, corr, rf, A, bHoldings })); } catch (e) {}
   }, [assets, corr, rf, A, bHoldings]);
+
+  /* Pull real volatilities, betas and correlations whenever the set of tickers
+     changes. Without this the model silently runs on a 0.35 placeholder
+     correlation for every pair until someone happens to press the button, and
+     a newly added holding reintroduces the placeholder. Keyed on the ticker
+     list alone — σ and E[r] write back into `assets`, so keying on the whole
+     array would loop. */
+  const tickerKey = assets.map((a) => String(a.name || "").trim().toUpperCase()).join(",");
+  const lastFetchedRef = React.useRef(null);
+  React.useEffect(() => {
+    const syms = tickerKey.split(",").filter(Boolean);
+    if (syms.length < 2 || tickerKey === lastFetchedRef.current) return;
+    const t = setTimeout(() => { lastFetchedRef.current = tickerKey; fetchMarketData(); }, 800);
+    return () => clearTimeout(t);
+  }, [tickerKey]);
 
   /* ---- shared model runners ---- */
   const [rev, setRev] = useState(0);
@@ -1244,6 +1269,12 @@ function FrontierApp() {
     const c = corr.map((r) => [...r]);
     c[Math.min(i, j)][Math.max(i, j)] = v;
     setCorr(c);
+    // A hand-entered figure is a deliberate choice, not an unmeasured gap.
+    setCorrReal((prev) => {
+      const nx = (prev || Array.from({ length: n }, () => Array(n).fill(false))).map((r) => [...r]);
+      if (nx[i] && nx[j]) { nx[i][j] = true; nx[j][i] = true; }
+      return nx;
+    });
   };
   const addAsset = () => {
     if (n >= 30) return;
@@ -1251,11 +1282,14 @@ function FrontierApp() {
     const c = corr.map((r) => [...r, 0.35]);
     c.push(Array(n + 1).fill(0.35)); c[n][n] = 1;
     setCorr(c);
+    // The new row/column is unmeasured until market data comes back for it.
+    setCorrReal((prev) => (prev ? prev.map((r) => [...r, false]).concat([Array(n + 1).fill(false)]) : null));
   };
   const removeAsset = (i) => {
     if (n <= 2) return;
     setAssets(assets.filter((_, k) => k !== i));
     setCorr(corr.filter((_, r2) => r2 !== i).map((r) => r.filter((_, c2) => c2 !== i)));
+    setCorrReal((prev) => (prev ? prev.filter((_, r2) => r2 !== i).map((r) => r.filter((_, c2) => c2 !== i)) : null));
   };
 
   /* ---- AI with safeguards ---- */
@@ -2347,12 +2381,14 @@ function FrontierApp() {
                         <td style={{ ...td, fontWeight: 700, fontSize: 11.5 }}>{a.name}</td>
                         {assets.map((_, j) => {
                           const v = i === j ? 1 : corr[Math.min(i, j)][Math.max(i, j)];
+                          const measured = i === j || !!(corrReal && corrReal[i] && corrReal[i][j]);
                           const heat = i === j ? T.band : v >= 0 ? `rgba(16,185,129,${0.08 + v * 0.38})` : `rgba(96,165,250,${0.08 + Math.abs(v) * 0.38})`;
                           return (
                             <td key={j} style={{ ...td, padding: 3, borderBottom: "none" }}>
-                              {j < i ? <div style={{ width: 52, height: 30, background: heat, borderRadius: T.radiusSm, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontVariantNumeric: "tabular-nums", color: T.ink }}>{v.toFixed(2)}</div>
+                              {j < i ? <div title={measured ? "Measured from weekly returns" : "Placeholder — not measured"}
+                                style={{ width: 52, height: 30, background: heat, borderRadius: T.radiusSm, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontVariantNumeric: "tabular-nums", color: T.ink, border: measured ? "1px solid transparent" : `1px dashed ${T.copper}`, opacity: measured ? 1 : 0.65 }}>{num(v)}</div>
                                 : j === i ? <div style={{ width: 52, height: 30, background: T.surface, borderRadius: T.radiusSm, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: T.faint }}>1.00</div>
-                                : <div style={{ width: 52 }}><Field value={corr[i][j]} onChange={(vv) => setRho(i, j, vv)} w={52} /></div>}
+                                : <div style={{ width: 52 }} title={measured ? "Measured from weekly returns" : "Placeholder — not measured"}><Field value={corr[i][j]} onChange={(vv) => setRho(i, j, vv)} w={52} /></div>}
                             </td>
                           );
                         })}
@@ -2360,7 +2396,19 @@ function FrontierApp() {
                     ))}
                   </tbody>
                 </table>
-                <div style={{ fontSize: 11, color: T.faint, marginTop: 8 }}>Edit the upper triangle · heatmap mirrors below (green positive, blue negative)</div>
+                {(() => {
+                  const n = assets.length;
+                  let ph = 0, tot = 0;
+                  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { tot++; if (!(corrReal && corrReal[i] && corrReal[i][j])) ph++; }
+                  return (
+                    <div style={{ fontSize: 11, marginTop: 8, lineHeight: 1.6, color: ph ? T.copper : T.sage }}>
+                      {ph === 0
+                        ? `All ${tot} pairs measured from weekly returns over the past 5 years.`
+                        : `${ph} of ${tot} pairs ${ph === 1 ? "is a placeholder that has" : "are placeholders that have"} not been measured — shown dashed. ${mktLoading ? "Pulling market data now…" : "Press Fetch market data, or edit them directly."}`}
+                      <span style={{ color: T.faint }}> · Edit the upper triangle · heatmap mirrors below (green positive, blue negative)</span>
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <div style={{ fontSize: 13, color: T.faint }}>Edit every pairwise correlation and see the matrix as a live heatmap.</div>
