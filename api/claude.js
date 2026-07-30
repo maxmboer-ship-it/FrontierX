@@ -340,6 +340,14 @@ async function main(req, res) {
       if (!haveStatements) notes.push("Annual statement data unavailable for " + sym + " — funds, ETFs and some non-US listings do not report company financials.");
       if (!auth) notes.push("Yahoo quote-detail feed was gated this round; multiples were computed from statement data where possible.");
 
+      if (getParam("dbg")) {
+        return res.status(200).json({
+          dbg: true,
+          tsStatus: tsRes.status, tsRaw: String(tsRes.raw).slice(0, 700),
+          chartStatus: chart.status, chartRaw: String(chart.raw).slice(0, 300),
+          gotCrumb: !!auth, tsUrl,
+        });
+      }
       return res.status(200).json({
         symbol: sym, name: name || sym, currency: currency || "USD",
         price, quote: q2, series, haveStatements,
