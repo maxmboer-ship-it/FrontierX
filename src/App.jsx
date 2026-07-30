@@ -292,12 +292,12 @@ const GROUPS = [
 ["US · Banks",26,"JPM~JPMorgan Chase;BAC~Bank of America;WFC~Wells Fargo;C~Citigroup;USB~US Bancorp;PNC~PNC;TFC~Truist;COF~Capital One;KEY~KeyCorp;RF~Regions;CFG~Citizens;HBAN~Huntington;FITB~Fifth Third;MTB~M&T Bank;STT~State Street;BK~BNY;NTRS~Northern Trust"],
 ["US · Capital Markets",28,"GS~Goldman Sachs;MS~Morgan Stanley;SCHW~Charles Schwab;BLK~BlackRock;KKR~KKR;BX~Blackstone;APO~Apollo;TROW~T Rowe Price;BEN~Franklin;IVZ~Invesco;AMP~Ameriprise;RJF~Raymond James;MSCI~MSCI;NDAQ~Nasdaq;ICE~Intercontinental Exchange;CME~CME Group;CBOE~Cboe;MKTX~MarketAxess;FDS~FactSet;MCO~Moody's;SPGI~S&P Global;HOOD~Robinhood"],
 ["US · Payments & Fintech",23,"V~Visa;MA~Mastercard;AXP~American Express;PYPL~PayPal;FI~Fiserv;FIS~FIS;GPN~Global Payments;SYF~Synchrony"],
-["US · Insurance",19,"BRK.B~Berkshire Hathaway;PGR~Progressive;CB~Chubb;MMC~Marsh McLennan;AON~Aon;AJG~Gallagher;MET~MetLife;AIG~AIG;PRU~Prudential;AFL~Aflac;ALL~Allstate;TRV~Travelers;HIG~Hartford;WTW~WTW;BRO~Brown & Brown;EG~Everest;CINF~Cincinnati Financial;L~Loews;GL~Globe Life;AIZ~Assurant;WRB~WR Berkley;ACGL~Arch Capital;PFG~Principal;ERIE~Erie Indemnity"],
+["US · Insurance",19,"BRK-B~Berkshire Hathaway;PGR~Progressive;CB~Chubb;MMC~Marsh McLennan;AON~Aon;AJG~Gallagher;MET~MetLife;AIG~AIG;PRU~Prudential;AFL~Aflac;ALL~Allstate;TRV~Travelers;HIG~Hartford;WTW~WTW;BRO~Brown & Brown;EG~Everest;CINF~Cincinnati Financial;L~Loews;GL~Globe Life;AIZ~Assurant;WRB~WR Berkley;ACGL~Arch Capital;PFG~Principal;ERIE~Erie Indemnity"],
 // ————— S&P 500 · Consumer Discretionary —————
 ["US · Consumer Discretionary",28,"AMZN~Amazon;HD~Home Depot;MCD~McDonald's;BKNG~Booking;LOW~Lowe's;TJX~TJX;SBUX~Starbucks;NKE~Nike;CMG~Chipotle;ORLY~O'Reilly;AZO~AutoZone;MAR~Marriott;HLT~Hilton;GM~General Motors;F~Ford;YUM~Yum Brands;DRI~Darden;ROST~Ross;DG~Dollar General;DLTR~Dollar Tree;BBY~Best Buy;EBAY~eBay;DECK~Deckers;LULU~Lululemon;RL~Ralph Lauren;TPR~Tapestry;GRMN~Garmin;EXPE~Expedia;POOL~Pool Corp;KMX~CarMax;APTV~Aptiv;GPC~Genuine Parts;ULTA~Ulta;WSM~Williams-Sonoma;TSCO~Tractor Supply;HAS~Hasbro;MHK~Mohawk;DHI~DR Horton;LEN~Lennar;PHM~PulteGroup;NVR~NVR"],
 ["US · Travel & Casinos",36,"RCL~Royal Caribbean;CCL~Carnival;NCLH~Norwegian;LVS~Las Vegas Sands;WYNN~Wynn;MGM~MGM;CZR~Caesars;DAL~Delta;UAL~United Airlines;LUV~Southwest;AAL~American Airlines"],
 // ————— S&P 500 · Consumer Staples —————
-["US · Staples",15,"WMT~Walmart;PG~Procter & Gamble;COST~Costco;KO~Coca-Cola;PEP~PepsiCo;PM~Philip Morris;MO~Altria;MDLZ~Mondelez;CL~Colgate;TGT~Target;KMB~Kimberly-Clark;GIS~General Mills;KDP~Keurig Dr Pepper;MNST~Monster;STZ~Constellation Brands;HSY~Hershey;KR~Kroger;SYY~Sysco;ADM~ADM;KHC~Kraft Heinz;CHD~Church & Dwight;MKC~McCormick;CLX~Clorox;CAG~Conagra;CPB~Campbell's;HRL~Hormel;SJM~JM Smucker;TSN~Tyson;TAP~Molson Coors;BG~Bunge;LW~Lamb Weston;EL~Estée Lauder;BF.B~Brown-Forman;CASY~Casey's"],
+["US · Staples",15,"WMT~Walmart;PG~Procter & Gamble;COST~Costco;KO~Coca-Cola;PEP~PepsiCo;PM~Philip Morris;MO~Altria;MDLZ~Mondelez;CL~Colgate;TGT~Target;KMB~Kimberly-Clark;GIS~General Mills;KDP~Keurig Dr Pepper;MNST~Monster;STZ~Constellation Brands;HSY~Hershey;KR~Kroger;SYY~Sysco;ADM~ADM;KHC~Kraft Heinz;CHD~Church & Dwight;MKC~McCormick;CLX~Clorox;CAG~Conagra;CPB~Campbell's;HRL~Hormel;SJM~JM Smucker;TSN~Tyson;TAP~Molson Coors;BG~Bunge;LW~Lamb Weston;EL~Estée Lauder;BF-B~Brown-Forman;CASY~Casey's"],
 // ————— S&P 500 · Energy —————
 ["US · Energy",30,"XOM~Exxon Mobil;CVX~Chevron;COP~ConocoPhillips;EOG~EOG Resources;SLB~Schlumberger;MPC~Marathon Petroleum;PSX~Phillips 66;VLO~Valero;WMB~Williams;OKE~ONEOK;KMI~Kinder Morgan;OXY~Occidental;FANG~Diamondback;DVN~Devon;HAL~Halliburton;BKR~Baker Hughes;CTRA~Coterra;EQT~EQT;APA~APA;TRGP~Targa;EXE~Expand Energy"],
 // ————— S&P 500 · Industrials —————
@@ -710,6 +710,25 @@ function deriveDefaults(fund, hist, rf, mrp) {
   const ratio = (f) => avgOf(tail.map((h) => (h.rev > 0 ? f(h) / h.rev : NaN)));
   const clamp = (v, lo, hi, dflt) => (isFinite(v) ? Math.max(lo, Math.min(hi, v)) : dflt);
 
+  /* Provenance. Every input below is either computed from a reported line or,
+     when that line is absent, filled with a generic constant. A filled-in
+     constant is not this company's data and must never pass as if it were, so
+     each one is recorded here and surfaced in the panel. */
+  const reported = (k) => hist.some((h) => h[k] != null);
+  const sourced = {
+    growth: reported("rev"),
+    ebitMargin: reported("ebit"),
+    ebitdaMargin: reported("ebitda"),
+    daPct: reported("da"),
+    capexPct: reported("capex"),
+    nwcPct: reported("ca") && reported("cl"),
+    taxRate: hist.some((h) => h.taxRate != null),
+    kd: reported("interest") && reported("debt"),
+    beta: q.beta != null,
+    shares: q.shares != null || reported("shares"),
+    exitMult: q.evToEbitda != null,
+  };
+
   // Revenue growth, measured three ways. A single CAGR anchored on whatever
   // year the feed happens to start with is not enough — 2022 was a cyclical
   // peak for energy and a COVID peak for vaccine makers, and anchoring there
@@ -783,6 +802,7 @@ function deriveDefaults(fund, hist, rf, mrp) {
     growthCagr: cagr, growthYoyLatest: yoyLatest, growthYoyMedian: yoyMedian,
     growthClamped, measuresDisagree, spread,
     periods: n, taxImplausible, effTax, betaRaw, keFloored, waccFloored, keRaw, waccRaw,
+    sourced, unsourced: Object.keys(sourced).filter((k) => !sourced[k]),
     tg: 0.025,
     years: 10, // standard explicit period; short horizons load too much onto terminal value
     ebitMargin: clamp(ratio((h) => h.ebit), -0.5, 0.75, 0.15),
@@ -2091,12 +2111,23 @@ function FrontierApp() {
                           if (Math.abs(d0.betaRaw - d0.beta) > 0.02) notes.push(`Beta was adjusted from a raw ${num(d0.betaRaw)} to ${num(d0.beta)} using the standard two-thirds/one-third pull toward 1.0, since trailing betas are noisy and mean-revert.`);
                           if (d0.keFloored) notes.push(`CAPM returned a ${pct(d0.keRaw)} cost of equity off that beta, which is too close to the risk-free rate to discount equity with. It was floored at ${num(rf, 1)}% + 300bp.`);
                           if (d0.waccFloored) notes.push(`The blended WACC came to ${pct(d0.waccRaw)} and was floored at 6.0%.`);
+                          const LBL = {
+                            growth: "revenue growth", ebitMargin: "operating margin", ebitdaMargin: "EBITDA margin",
+                            daPct: "D&A", capexPct: "capex", nwcPct: "working capital", taxRate: "tax rate",
+                            kd: "cost of debt", beta: "beta", shares: "share count", exitMult: "exit multiple",
+                          };
+                          const missing = (d0.unsourced || []).filter((k) => k !== "exitMult" || val.asm.termMode === "exit");
                           return (
                             <div style={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, padding: "12px 14px", marginBottom: 18 }}>
                               <div style={{ ...label, fontSize: 9, marginBottom: 7, color: T.copper }}>How these defaults were set</div>
                               {notes.map((nt, i) => (
-                                <div key={i} style={{ fontSize: 11.5, color: "#C7D1DB", lineHeight: 1.6, marginBottom: i < notes.length - 1 ? 5 : 0 }}>· {nt}</div>
+                                <div key={i} style={{ fontSize: 11.5, color: "#C7D1DB", lineHeight: 1.6, marginBottom: 5 }}>· {nt}</div>
                               ))}
+                              <div style={{ fontSize: 11.5, lineHeight: 1.6, marginTop: 7, paddingTop: 7, borderTop: `1px solid ${T.rule}`, color: missing.length ? T.copper : T.sage }}>
+                                {missing.length === 0
+                                  ? "· Every input above is computed from this company's own reported figures. Nothing is filled in from a generic assumption."
+                                  : `· ${missing.map((k) => LBL[k] || k).join(", ")} ${missing.length === 1 ? "is" : "are"} not reported in the data available for this company, so a generic placeholder was used rather than its own figures. Treat ${missing.length === 1 ? "that input" : "those inputs"} as a guess and set ${missing.length === 1 ? "it" : "them"} yourself.`}
+                              </div>
                             </div>
                           );
                         })()}
