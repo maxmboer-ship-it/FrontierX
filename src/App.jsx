@@ -479,6 +479,16 @@ const PALETTE = [T.green, T.steel, T.copper, "#A78BFA", T.red, "#2DD4BF", "#FACC
 const pct = (v, d = 1) => (isFinite(v) ? (v * 100).toFixed(d) + "%" : "—");
 const num = (v, d = 2) => (isFinite(v) ? v.toFixed(d) : "—");
 const money = (v) => (isFinite(v) ? "$" + Math.round(v).toLocaleString() : "—");
+// Statement figures run to the hundreds of billions — scale them so a table stays readable.
+const bigMoney = (v) => {
+  if (!isFinite(v)) return "—";
+  const s = v < 0 ? "−" : "", a = Math.abs(v);
+  if (a >= 1e12) return s + (a / 1e12).toFixed(2) + "T";
+  if (a >= 1e9) return s + (a / 1e9).toFixed(1) + "B";
+  if (a >= 1e6) return s + (a / 1e6).toFixed(0) + "M";
+  if (a >= 1e3) return s + (a / 1e3).toFixed(0) + "K";
+  return s + a.toFixed(0);
+};
 const label = { fontFamily: T.ui, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.11em", color: T.sub };
 
 /* Numeric input.
@@ -620,6 +630,212 @@ const SCENARIOS = {
   boom: { name: "Risk-on", fn: (a, c, rf) => ({ a: a.map((x) => ({ ...x, er: x.er + 4 })), c: c.map((row, i) => row.map((v, j) => (i === j ? 1 : Math.max(-0.9, v - 0.15)))), rf }) },
 };
 
+/* ═══════════════ VALUATION CORE ═══════════════
+   Reported financials come from the API as { key: [{year, v}] }. Everything
+   below turns those facts into a normalized annual history, derives *default*
+   assumptions from that history, and runs the discounting. The projection is
+   a model, not data — every assumption it uses is surfaced and editable. */
+
+const svArr = (s, k) => (s && s[k]) || [];
+const avgOf = (a) => { const f = a.filter(isFinite); return f.length ? f.reduce((x, y) => x + y, 0) / f.length : NaN; };
+// Working-capital swings are spiky enough that one odd year distorts a mean.
+const medOf = (a) => {
+  const f = a.filter(isFinite).sort((x, y) => x - y);
+  if (!f.length) return NaN;
+  const m = Math.floor(f.length / 2);
+  return f.length % 2 ? f[m] : (f[m - 1] + f[m]) / 2;
+};
+const fin = (v, d = null) => (typeof v === "number" && isFinite(v) ? v : d);
+
+/* A free-cash-flow DCF assumes capex and working capital drive value. For banks,
+   insurers and REITs that assumption breaks down — deposits and float read as
+   "debt", and there is no meaningful unlevered cash flow. Say so rather than
+   printing a confident negative number. */
+const DCF_UNSUITABLE = /financial|bank|insurance|capital markets|real estate|reit|asset management/i;
+function dcfSuitability(fund, defaults) {
+  const sector = (fund.quote && fund.quote.sector) || "";
+  const industry = (fund.quote && fund.quote.industry) || "";
+  if (DCF_UNSUITABLE.test(sector) || DCF_UNSUITABLE.test(industry)) {
+    return { ok: false, why: `${sector || industry} businesses fund themselves with deposits, float or leverage that this model reads as debt. A free-cash-flow DCF is the wrong tool here — the multiples and returns below are the meaningful part.` };
+  }
+  if (!(defaults.ebitMargin > 0.005)) {
+    return { ok: false, why: "This company reports no meaningful operating margin in the periods available, so a discounted cash-flow projection has nothing dependable to build on." };
+  }
+  if (!(defaults.shares > 0) || !(defaults.rev0 > 0)) {
+    return { ok: false, why: "Share count or revenue is missing from the reported data, so a per-share value cannot be computed." };
+  }
+  return { ok: true, why: null };
+}
+
+function buildHistory(series) {
+  const years = svArr(series, "TotalRevenue").map((p) => p.year);
+  const at = (k, yr) => { const hit = svArr(series, k).find((p) => p.year === yr); return hit ? hit.v : null; };
+  const pick = (yr, ...keys) => { for (const k of keys) { const v = at(k, yr); if (v != null) return v; } return null; };
+  return years.map((yr) => {
+    const rev = at("TotalRevenue", yr);
+    const ebit = pick(yr, "EBIT", "OperatingIncome");
+    const pretax = at("PretaxIncome", yr);
+    const tax = at("TaxProvision", yr);
+    const capexRaw = at("CapitalExpenditure", yr);
+    return {
+      year: yr, rev, ebit,
+      ebitda: at("EBITDA", yr), ni: at("NetIncome", yr), pretax, tax,
+      da: pick(yr, "ReconciledDepreciation", "DepreciationAndAmortization"),
+      // Yahoo reports capex as a negative cash-flow line; we want the outflow magnitude.
+      capex: capexRaw == null ? null : Math.abs(capexRaw),
+      // ChangeInWorkingCapital is already signed as a cash-flow effect
+      // (negative = working capital consumed cash), so investment = −value.
+      nwcInv: at("ChangeInWorkingCapital", yr) == null ? null : -at("ChangeInWorkingCapital", yr),
+      ca: at("CurrentAssets", yr), cl: at("CurrentLiabilities", yr),
+      debt: at("TotalDebt", yr),
+      cash: pick(yr, "CashCashEquivalentsAndShortTermInvestments", "CashAndCashEquivalents"),
+      equity: at("StockholdersEquity", yr), shares: at("OrdinarySharesNumber", yr),
+      interest: at("InterestExpense", yr), invCap: at("InvestedCapital", yr),
+      fcf: at("FreeCashFlow", yr), ocf: at("OperatingCashFlow", yr),
+      // TaxRateForCalcs comes back as 0 from this feed, so always derive it.
+      taxRate: (pretax && tax != null && pretax > 0) ? tax / pretax : null,
+    };
+  });
+}
+
+function deriveDefaults(fund, hist, rf, mrp) {
+  const q = fund.quote || {};
+  const n = hist.length;
+  const last = hist[n - 1] || {};
+  const tail = hist.slice(-3);
+  const ratio = (f) => avgOf(tail.map((h) => (h.rev > 0 ? f(h) / h.rev : NaN)));
+  const clamp = (v, lo, hi, dflt) => (isFinite(v) ? Math.max(lo, Math.min(hi, v)) : dflt);
+
+  // Revenue CAGR across the reported window.
+  let cagr = NaN;
+  const first = hist.find((h) => h.rev > 0);
+  if (first && last.rev > 0 && last.year > first.year) {
+    cagr = Math.pow(last.rev / first.rev, 1 / (last.year - first.year)) - 1;
+  }
+
+  const taxRate = clamp(avgOf(tail.map((h) => h.taxRate)), 0.05, 0.45, 0.21);
+  const debt = fin(last.debt, fin(q.totalDebt, 0)) || 0;
+  const cash = fin(last.cash, fin(q.totalCash, 0)) || 0;
+  const shares = fin(q.shares, fin(last.shares, null));
+  const beta = clamp(fin(q.beta), 0.1, 3, 1);
+
+  // Cost of debt from what the company actually pays, not a guess.
+  const kdRaw = avgOf(tail.map((h) => (h.interest && h.debt > 0 ? h.interest / h.debt : NaN)));
+  const kd = clamp(kdRaw, 0.01, 0.15, 0.05);
+  const ke = rf / 100 + beta * (mrp / 100);
+  const mcap = fin(q.marketCap, shares && fund.price ? shares * fund.price : null);
+  const E = mcap || 0, D = debt;
+  const wacc = E + D > 0 ? (E / (E + D)) * ke + (D / (E + D)) * kd * (1 - taxRate) : ke;
+
+  return {
+    growth: clamp(cagr, -0.15, 0.45, 0.05),
+    tg: 0.025,
+    years: 10, // standard explicit period; short horizons load too much onto terminal value
+    ebitMargin: clamp(ratio((h) => h.ebit), -0.5, 0.75, 0.15),
+    ebitdaMargin: clamp(ratio((h) => h.ebitda), -0.5, 0.85, 0.2),
+    taxRate,
+    daPct: clamp(ratio((h) => h.da), 0, 0.5, 0.05),
+    capexPct: clamp(ratio((h) => h.capex), 0, 0.6, 0.05),
+    // Working capital as a *level* ratio (can be negative — Apple and Coca-Cola
+    // both run negative NWC, where growth releases cash rather than consuming it).
+    // The projection applies this to the change in revenue, not the level.
+    nwcPct: clamp(medOf(tail.map((h) => (h.rev > 0 && h.ca != null && h.cl != null ? (h.ca - h.cl) / h.rev : NaN))), -0.5, 0.6, 0.05),
+    wacc: clamp(wacc, 0.03, 0.30, 0.09),
+    ke: clamp(ke, 0.03, 0.35, 0.09),
+    kd, beta, taxRateSrc: taxRate,
+    rev0: fin(last.rev, fin(q.revenue, null)),
+    ebitda0: fin(last.ebitda, fin(q.ebitda, null)),
+    netDebt: debt - cash, debt, cash, shares,
+    exitMult: clamp(fin(q.evToEbitda), 3, 40, 10),
+    termMode: "gordon",
+  };
+}
+
+/* Projects FCFF and FCFE side by side off one set of operating assumptions,
+   so the levered and unlevered answers are internally consistent. */
+function runDCF(a) {
+  if (!a || !isFinite(a.rev0) || a.rev0 <= 0 || !isFinite(a.shares) || a.shares <= 0) return null;
+  const yrs = Math.max(1, Math.min(15, Math.round(a.years)));
+  const rows = [];
+  let rev = a.rev0, debt = a.debt || 0;
+  for (let t = 1; t <= yrs; t++) {
+    // Growth fades linearly from the starting rate to the terminal rate.
+    const g = yrs === 1 ? a.tg : a.growth + (a.tg - a.growth) * ((t - 1) / (yrs - 1));
+    const prevRev = rev;
+    rev *= 1 + g;
+    const ebit = rev * a.ebitMargin;
+    const nopat = ebit * (1 - a.taxRate);
+    const da = rev * a.daPct, capex = rev * a.capexPct;
+    // Working capital is only invested (or released) as revenue changes.
+    const nwc = a.nwcPct * (rev - prevRev);
+    const fcff = nopat + da - capex - nwc;
+    // Debt is held at a constant share of revenue, so net borrowing funds growth.
+    const newDebt = debt * (1 + g), netBorrow = newDebt - debt;
+    const interest = debt * a.kd;
+    const ni = (ebit - interest) * (1 - a.taxRate);
+    const fcfe = ni + da - capex - nwc + netBorrow;
+    debt = newDebt;
+    rows.push({ t, g, rev, ebit, nopat, da, capex, nwc, fcff, ni, interest, netBorrow, fcfe, ebitda: ebit + da });
+  }
+  const lastRow = rows[yrs - 1];
+  const disc = (r) => rows.map((x) => 1 / Math.pow(1 + r, x.t));
+
+  const termAt = (r, flow) => {
+    if (a.termMode === "exit") return lastRow.ebitda * a.exitMult;
+    if (!(r > a.tg)) return NaN; // Gordon is undefined once growth meets the discount rate
+    return (flow * (1 + a.tg)) / (r - a.tg);
+  };
+
+  // ── Unlevered: FCFF @ WACC → enterprise value → equity
+  const dfU = disc(a.wacc);
+  const pvU = rows.reduce((s, x, i) => s + x.fcff * dfU[i], 0);
+  const tvU = termAt(a.wacc, lastRow.fcff);
+  const pvTvU = isFinite(tvU) ? tvU / Math.pow(1 + a.wacc, yrs) : NaN;
+  const ev = pvU + pvTvU;
+  const eqU = ev - a.netDebt;
+  const psU = eqU / a.shares;
+
+  // ── Levered: FCFE @ cost of equity → equity value directly
+  const dfL = disc(a.ke);
+  const pvL = rows.reduce((s, x, i) => s + x.fcfe * dfL[i], 0);
+  // An exit multiple prices the whole firm, so back out debt to keep it an equity figure.
+  const tvLraw = a.termMode === "exit" ? lastRow.ebitda * a.exitMult - debt : termAt(a.ke, lastRow.fcfe);
+  const pvTvL = isFinite(tvLraw) ? tvLraw / Math.pow(1 + a.ke, yrs) : NaN;
+  const eqL = pvL + pvTvL;
+  const psL = eqL / a.shares;
+
+  return {
+    rows, ev, equityU: eqU, perShareU: psU, pvExplicitU: pvU, pvTermU: pvTvU,
+    equityL: eqL, perShareL: psL, pvExplicitL: pvL, pvTermL: pvTvL,
+    termPctU: isFinite(pvTvU) && ev ? pvTvU / ev : NaN,
+    termPctL: isFinite(pvTvL) && eqL ? pvTvL / eqL : NaN,
+  };
+}
+
+/* What revenue growth would today's share price have to be assuming?
+   Returns { g } when the price is reachable, or { beyond: "above"|"below" }
+   when even the extremes of the search range cannot get there — that is a real
+   answer about the price, not a failure, so report it as one. */
+const RDCF_LO = -0.50, RDCF_HI = 1.50;
+function reverseDCF(a, price) {
+  if (!isFinite(price) || price <= 0) return null;
+  const f = (g) => {
+    const r = runDCF({ ...a, growth: g });
+    return r && isFinite(r.perShareU) ? r.perShareU - price : NaN;
+  };
+  let lo = RDCF_LO, hi = RDCF_HI;
+  let flo = f(lo), fhi = f(hi);
+  if (!isFinite(flo) || !isFinite(fhi)) return null;
+  if (flo > 0) return { beyond: "below" };   // even a shrinking business is worth more than this
+  if (fhi < 0) return { beyond: "above" };   // even extreme growth cannot justify the price
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2, fm = f(mid);
+    if (!isFinite(fm)) return null;
+    if (flo * fm <= 0) hi = mid; else { lo = mid; flo = fm; }
+  }
+  return { g: (lo + hi) / 2 };
+}
+
 /* ═══════════════ APP ═══════════════ */
 
 /* Analytics: never let a blocked/absent tracker throw into React. */
@@ -732,6 +948,31 @@ function FrontierApp() {
   // frontier curve itself is drawn from, so the marker always sits on the line.
   const [frontierT, setFrontierT] = useState(1);
 
+  /* ---- valuation (Pro) ---- */
+  const [valSym, setValSym] = useState("");
+  const [valData, setValData] = useState(null);
+  const [valLoading, setValLoading] = useState(false);
+  const [valErr, setValErr] = useState(null);
+  // User edits layered over the history-derived defaults; null = use the default.
+  const [valOv, setValOv] = useState({});
+  const loadValuation = async (sym) => {
+    const s = String(sym || "").trim().toUpperCase();
+    if (!s) return;
+    setValLoading(true); setValErr(null); setValData(null); setValOv({});
+    ev("valuation_run", { symbol: s });
+    try {
+      const r = await fetch("/api/claude?fund=" + encodeURIComponent(s));
+      const d = await r.json();
+      if (d.crashed) { setValErr("The data service failed on that request. Try again in a moment."); }
+      else if (!d.haveStatements) {
+        setValErr((d.notes && d.notes[0]) || ("No company financials are published for " + s + "."));
+        setValData(d);
+      } else setValData(d);
+    } catch (e) {
+      setValErr("Couldn't reach the financial data service.");
+    } finally { setValLoading(false); }
+  };
+
   React.useEffect(() => {
     try { localStorage.setItem("fx_book", JSON.stringify({ assets, corr, rf, A, bHoldings })); } catch (e) {}
   }, [assets, corr, rf, A, bHoldings]);
@@ -825,6 +1066,65 @@ function FrontierApp() {
     () => (base ? quantInsights(assets, corr, { tan: base.tan }, rf / 100, A) : []),
     [base, rev]
   );
+
+  /* Valuation model. Defaults come from the reported history; anything the user
+     has overridden wins. Recomputes on every edit so the sensitivity of the
+     answer to each assumption is visible immediately. */
+  const val = useMemo(() => {
+    if (!valData || !valData.haveStatements) return null;
+    const hist = buildHistory(valData.series);
+    if (!hist.length) return null;
+    const defs = deriveDefaults(valData, hist, rf, 5.5);
+    const asm = { ...defs };
+    for (const k in valOv) if (valOv[k] != null && isFinite(valOv[k])) asm[k] = valOv[k];
+    if (valOv.termMode) asm.termMode = valOv.termMode;
+    const suit = dcfSuitability(valData, asm);
+    const dcf = suit.ok ? runDCF(asm) : null;
+    const price = valData.price;
+    const implied = reverseDCF(asm, price);
+
+    // WACC × terminal-growth grid — the honest way to show a DCF's range.
+    const grid = suit.ok ? (() => {
+      const waccs = [-0.02, -0.01, 0, 0.01, 0.02].map((d) => asm.wacc + d).filter((w) => w > 0.01);
+      const tgs = [-0.01, -0.005, 0, 0.005, 0.01].map((d) => asm.tg + d);
+      return {
+        waccs, tgs,
+        cells: waccs.map((w) => tgs.map((g) => {
+          const o = runDCF({ ...asm, wacc: w, tg: g });
+          return o && isFinite(o.perShareU) ? o.perShareU : NaN;
+        })),
+      };
+    })() : null;
+
+    const q = valData.quote || {};
+    const last = hist[hist.length - 1];
+    const mcap = fin(q.marketCap, asm.shares && price ? asm.shares * price : null);
+    const evNow = fin(q.enterpriseValue, mcap != null ? mcap + asm.netDebt : null);
+    const safeDiv = (a2, b2) => (isFinite(a2) && isFinite(b2) && b2 !== 0 ? a2 / b2 : NaN);
+    const multiples = [
+      { l: "P/E (trailing)", v: fin(q.trailingPE, safeDiv(mcap, last.ni)), d: 1 },
+      { l: "P/E (forward)", v: fin(q.forwardPE), d: 1 },
+      { l: "EV / EBITDA", v: fin(q.evToEbitda, safeDiv(evNow, last.ebitda)), d: 1 },
+      { l: "EV / Sales", v: fin(q.evToRevenue, safeDiv(evNow, last.rev)), d: 2 },
+      { l: "EV / EBIT", v: safeDiv(evNow, last.ebit), d: 1 },
+      { l: "Price / Book", v: fin(q.priceToBook, safeDiv(mcap, last.equity)), d: 2 },
+      { l: "Price / FCF", v: safeDiv(mcap, last.fcf), d: 1 },
+      { l: "PEG", v: fin(q.pegRatio), d: 2 },
+      { l: "FCF yield", v: safeDiv(last.fcf, mcap), d: 2, pct: true },
+      { l: "Dividend yield", v: fin(q.dividendYield), d: 2, pct: true },
+    ];
+    const quality = [
+      { l: "Operating margin", v: safeDiv(last.ebit, last.rev), pct: true },
+      { l: "Net margin", v: safeDiv(last.ni, last.rev), pct: true },
+      { l: "Return on equity", v: fin(q.returnOnEquity, safeDiv(last.ni, last.equity)), pct: true },
+      { l: "ROIC (after tax)", v: safeDiv(last.ebit * (1 - asm.taxRate), last.invCap), pct: true },
+      { l: "Net debt / EBITDA", v: safeDiv(asm.netDebt, last.ebitda), d: 2 },
+      { l: "Interest coverage", v: safeDiv(last.ebit, last.interest), d: 1 },
+      { l: "Effective tax rate", v: asm.taxRate, pct: true },
+      { l: "Revenue CAGR (reported)", v: defs.growth, pct: true },
+    ];
+    return { hist, defs, asm, suit, dcf, grid, implied, price, multiples, quality, mcap, evNow, q };
+  }, [valData, valOv, rf]);
 
   /* ---- basic-mode derived model ---- */
   const basic = useMemo(() => {
@@ -1615,6 +1915,312 @@ function FrontierApp() {
                     </div>
                   ))}
                 </div>
+              </>
+            )}
+          </Panel>
+
+          {/* ═════════ VALUATION LAB (Pro) ═════════ */}
+          <Panel title={`Valuation lab · DCF and multiples${!isPro ? " · Pro" : ""}`}
+            right={!isPro && <Btn small primary onClick={() => setShowPaywall(true)}>Unlock</Btn>}>
+            <Hint>Pulls a company's reported financial statements and builds a discounted cash-flow model from them — levered and unlevered — alongside the usual trading multiples. Every assumption starts from that company's own history and every one of them is editable.</Hint>
+            {!isPro ? (
+              <div style={{ fontSize: 13, color: T.faint }}>
+                Reported income statement, balance sheet and cash-flow data for any listed company, a full DCF (FCFF and FCFE) with an editable assumption set, a WACC × terminal-growth sensitivity grid, a reverse DCF, and ten valuation multiples.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+                  <TickerInput
+                    value={valSym}
+                    onChange={setValSym}
+                    onSelect={(r) => { setValSym(r.t); loadValuation(r.t); }}
+                    width={220}
+                  />
+                  <Btn small primary onClick={() => loadValuation(valSym)} disabled={valLoading || !valSym.trim()}>
+                    {valLoading ? "Pulling filings…" : "Value it"}
+                  </Btn>
+                  {valData && val && (
+                    <span style={{ fontSize: 12, color: T.sub }}>
+                      {valData.name} · {valData.currency} {num(valData.price)} · {(val.q.sector || "—")}
+                    </span>
+                  )}
+                </div>
+
+                {valErr && (
+                  <div style={{ background: T.goldBg, border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "12px 14px", fontSize: 12.5, color: T.copper, marginBottom: 14 }}>
+                    {valErr}
+                  </div>
+                )}
+
+                {!valData && !valLoading && !valErr && (
+                  <div style={{ fontSize: 13, color: T.faint }}>Search a company above to pull its filings and build the model.</div>
+                )}
+
+                {val && (
+                  <>
+                    {/* ── suitability gate ── */}
+                    {!val.suit.ok && (
+                      <div style={{ background: T.goldBg, border: `1px solid ${T.goldBorder}`, borderRadius: T.radiusMd, padding: "13px 15px", fontSize: 12.5, color: T.copper, marginBottom: 18, lineHeight: 1.6 }}>
+                        <strong style={{ display: "block", marginBottom: 4 }}>No DCF for this one.</strong>
+                        {val.suit.why}
+                      </div>
+                    )}
+
+                    {/* ── headline result ── */}
+                    {val.dcf && (() => {
+                      const psU = val.dcf.perShareU, psL = val.dcf.perShareL, p = val.price;
+                      const up = isFinite(psU) && isFinite(p) ? psU / p - 1 : NaN;
+                      const cur = valData.currency + " ";
+                      return (
+                        <StatRow items={[
+                          { l: "Market price", v: cur + num(p), c: T.pink },
+                          { l: "Unlevered DCF (FCFF)", v: isFinite(psU) ? cur + num(psU) : "—", c: T.green },
+                          { l: "Levered DCF (FCFE)", v: isFinite(psL) ? cur + num(psL) : "—", c: T.greenLight },
+                          { l: "Gap to price", v: isFinite(up) ? (up >= 0 ? "+" : "") + (up * 100).toFixed(0) + "%" : "—", c: up >= 0 ? T.green : T.red },
+                        ]} />
+                      );
+                    })()}
+
+                    {/* ── assumptions ── */}
+                    {val.suit.ok && (
+                      <>
+                        <div style={{ ...label, fontSize: 10, color: T.ink, marginBottom: 8 }}>Assumptions — drawn from reported history, all editable</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, marginBottom: 8 }}>
+                          {[
+                            { k: "growth", l: "Revenue growth, yr 1", pct: true },
+                            { k: "tg", l: "Terminal growth", pct: true },
+                            { k: "years", l: "Explicit period (years)", pct: false, int: true },
+                            { k: "ebitMargin", l: "Operating (EBIT) margin", pct: true },
+                            { k: "taxRate", l: "Tax rate", pct: true },
+                            { k: "daPct", l: "D&A, % of revenue", pct: true },
+                            { k: "capexPct", l: "Capex, % of revenue", pct: true },
+                            { k: "nwcPct", l: "Working capital, % of revenue", pct: true },
+                            { k: "wacc", l: "WACC (discount rate)", pct: true },
+                            { k: "ke", l: "Cost of equity", pct: true },
+                          ].map(({ k, l, pct: isP, int }) => {
+                            const shown = int ? val.asm[k] : Math.round(val.asm[k] * 1000) / 10;
+                            const edited = valOv[k] != null;
+                            return (
+                              <div key={k} style={{ background: T.band, border: `1px solid ${edited ? T.goldBorder : T.rule}`, borderRadius: T.radiusMd, padding: "10px 12px" }}>
+                                <div style={{ ...label, fontSize: 9, marginBottom: 6 }}>{l}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <Field
+                                    value={shown}
+                                    w={72}
+                                    onChange={(v2) => setValOv({ ...valOv, [k]: int ? Math.max(1, Math.min(15, Math.round(v2))) : v2 / 100 })}
+                                  />
+                                  {isP && <span style={{ fontSize: 12, color: T.faint }}>%</span>}
+                                  {edited && (
+                                    <button onClick={() => { const n2 = { ...valOv }; delete n2[k]; setValOv(n2); }}
+                                      style={{ marginLeft: "auto", background: "none", border: "none", color: T.faint, fontSize: 10, cursor: "pointer", textDecoration: "underline" }}>reset</button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 18, lineHeight: 1.6 }}>
+                          Growth fades in a straight line from year 1 to the terminal rate. Working capital is applied to the <em>change</em> in revenue, so a negative figure means growth releases cash. WACC blends a CAPM cost of equity (β {num(val.asm.beta)} against a 5.5% market risk premium and your {num(rf, 1)}% risk-free rate) with an after-tax cost of debt of {(val.asm.kd * 100).toFixed(2)}% taken from interest actually paid.
+                        </div>
+
+                        {/* ── terminal value method ── */}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
+                          <span style={{ ...label, fontSize: 9.5 }}>Terminal value</span>
+                          {[["gordon", "Perpetual growth"], ["exit", "Exit EV/EBITDA multiple"]].map(([m, lbl]) => (
+                            <button key={m} onClick={() => setValOv({ ...valOv, termMode: m })}
+                              style={{
+                                fontFamily: T.ui, fontSize: 11.5, fontWeight: 700, padding: "6px 14px", borderRadius: T.pill, cursor: "pointer",
+                                border: `1px solid ${val.asm.termMode === m ? T.green : T.ruleDark}`,
+                                background: val.asm.termMode === m ? "rgba(16,185,129,0.12)" : "transparent",
+                                color: val.asm.termMode === m ? T.green : T.sub,
+                              }}>{lbl}</button>
+                          ))}
+                          {val.asm.termMode === "exit" && (
+                            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <Field value={Math.round(val.asm.exitMult * 10) / 10} w={64} onChange={(v2) => setValOv({ ...valOv, exitMult: v2 })} />
+                              <span style={{ fontSize: 12, color: T.faint }}>× EBITDA</span>
+                            </span>
+                          )}
+                          {val.dcf && isFinite(val.dcf.termPctU) && (
+                            <span style={{ fontSize: 11.5, color: val.dcf.termPctU > 0.8 ? T.copper : T.faint }}>
+                              Terminal value is {(val.dcf.termPctU * 100).toFixed(0)}% of the total{val.dcf.termPctU > 0.8 ? " — most of the answer rests on the perpetuity, not the forecast" : ""}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* ── projection table ── */}
+                        {val.dcf && (
+                          <div style={{ overflowX: "auto", marginBottom: 18 }}>
+                            <table style={{ borderCollapse: "collapse", minWidth: 620, width: "100%" }}>
+                              <thead>
+                                <tr>
+                                  <th style={th}>Year</th>
+                                  <th style={thNum}>Growth</th>
+                                  <th style={thNum}>Revenue</th>
+                                  <th style={thNum}>EBIT</th>
+                                  <th style={thNum}>NOPAT</th>
+                                  <th style={thNum}>+ D&A</th>
+                                  <th style={thNum}>− Capex</th>
+                                  <th style={thNum}>− ΔWC</th>
+                                  <th style={thNum}>FCFF</th>
+                                  <th style={thNum}>FCFE</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {val.dcf.rows.map((r2) => (
+                                  <tr key={r2.t}>
+                                    <td style={{ ...td, fontWeight: 700 }}>{r2.t}</td>
+                                    <td style={{ ...td, textAlign: "right", color: T.sub }}>{(r2.g * 100).toFixed(1)}%</td>
+                                    <td style={{ ...td, textAlign: "right" }}>{bigMoney(r2.rev)}</td>
+                                    <td style={{ ...td, textAlign: "right" }}>{bigMoney(r2.ebit)}</td>
+                                    <td style={{ ...td, textAlign: "right" }}>{bigMoney(r2.nopat)}</td>
+                                    <td style={{ ...td, textAlign: "right", color: T.sub }}>{bigMoney(r2.da)}</td>
+                                    <td style={{ ...td, textAlign: "right", color: T.sub }}>{bigMoney(r2.capex)}</td>
+                                    <td style={{ ...td, textAlign: "right", color: T.sub }}>{bigMoney(r2.nwc)}</td>
+                                    <td style={{ ...td, textAlign: "right", fontWeight: 700, color: T.green }}>{bigMoney(r2.fcff)}</td>
+                                    <td style={{ ...td, textAlign: "right", fontWeight: 700, color: T.greenLight }}>{bigMoney(r2.fcfe)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {/* ── bridge ── */}
+                        {val.dcf && (
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 18 }}>
+                            {[
+                              { l: "PV of forecast FCFF", v: bigMoney(val.dcf.pvExplicitU) },
+                              { l: "PV of terminal value", v: bigMoney(val.dcf.pvTermU) },
+                              { l: "Enterprise value", v: bigMoney(val.dcf.ev), c: T.steel },
+                              { l: "Less net debt", v: bigMoney(val.asm.netDebt) },
+                              { l: "Equity value", v: bigMoney(val.dcf.equityU), c: T.green },
+                            ].map((k, i) => (
+                              <div key={i} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radiusMd, padding: "11px 13px" }}>
+                                <div style={{ ...label, fontSize: 9, marginBottom: 5 }}>{k.l}</div>
+                                <div style={{ fontFamily: T.ui, fontSize: 15, fontWeight: 800, color: k.c || T.ink, fontVariantNumeric: "tabular-nums" }}>{k.v}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* ── sensitivity grid ── */}
+                        {val.grid && val.grid.cells.length > 0 && (
+                          <>
+                            <div style={{ ...label, fontSize: 10, color: T.ink, marginBottom: 8 }}>Sensitivity — value per share by WACC and terminal growth</div>
+                            <div style={{ overflowX: "auto", marginBottom: 8 }}>
+                              <table style={{ borderCollapse: "collapse" }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ ...th, fontSize: 9 }}>WACC ↓ / g →</th>
+                                    {val.grid.tgs.map((g, j) => <th key={j} style={{ ...thNum, fontSize: 9 }}>{(g * 100).toFixed(1)}%</th>)}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {val.grid.cells.map((row, i) => (
+                                    <tr key={i}>
+                                      <td style={{ ...td, fontWeight: 700, fontSize: 11.5 }}>{(val.grid.waccs[i] * 100).toFixed(1)}%</td>
+                                      {row.map((c, j) => {
+                                        const ok = isFinite(c) && isFinite(val.price);
+                                        const rel = ok ? c / val.price - 1 : NaN;
+                                        const bg = !ok ? T.surface
+                                          : rel >= 0 ? `rgba(16,185,129,${Math.min(0.42, 0.08 + rel * 0.5)})`
+                                            : `rgba(248,113,113,${Math.min(0.42, 0.08 + Math.abs(rel) * 0.5)})`;
+                                        const isCentre = val.grid.waccs[i].toFixed(4) === val.asm.wacc.toFixed(4) && val.grid.tgs[j].toFixed(4) === val.asm.tg.toFixed(4);
+                                        return (
+                                          <td key={j} style={{ ...td, padding: 3, borderBottom: "none" }}>
+                                            <div style={{
+                                              minWidth: 64, height: 32, background: bg, borderRadius: T.radiusSm,
+                                              border: isCentre ? `1.5px solid ${T.ink}` : "1px solid transparent",
+                                              display: "flex", alignItems: "center", justifyContent: "center",
+                                              fontSize: 11.5, fontVariantNumeric: "tabular-nums", color: T.ink,
+                                            }}>{ok ? num(c, c > 100 ? 0 : 1) : "—"}</div>
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div style={{ fontSize: 11.5, color: T.faint, marginBottom: 18 }}>
+                              Green sits above the {valData.currency} {num(val.price)} market price, red below. The outlined cell is your current assumption set. The spread across this grid is the honest width of the answer — a single number would hide it.
+                            </div>
+                          </>
+                        )}
+
+                        {/* ── reverse DCF ── */}
+                        {val.implied && (
+                          <div style={{ background: T.band2, border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, padding: "13px 15px", fontSize: 12.5, color: "#C7D1DB", marginBottom: 18, lineHeight: 1.65 }}>
+                            <strong style={{ color: T.ink }}>Reverse DCF · </strong>
+                            {val.implied.beyond === "above"
+                              ? `Holding every other assumption still, no revenue growth rate inside a −50% to +150% range gets this model to today's ${valData.currency} ${num(val.price)} price. The market is valuing something this model does not capture, or the assumptions above need revisiting.`
+                              : val.implied.beyond === "below"
+                                ? `Even at a 50% annual revenue decline this model values the company above its ${valData.currency} ${num(val.price)} price.`
+                                : `Today's price of ${valData.currency} ${num(val.price)} is consistent with about ${(val.implied.g * 100).toFixed(1)}% annual revenue growth in year 1, fading to ${(val.asm.tg * 100).toFixed(1)}%, if every other assumption above holds. Reported history was ${(val.defs.growth * 100).toFixed(1)}%.`}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* ── multiples & quality (shown even when a DCF is unsuitable) ── */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18, marginBottom: 18 }}>
+                      <div>
+                        <div style={{ ...label, fontSize: 10, color: T.ink, marginBottom: 8 }}>Trading multiples</div>
+                        {val.multiples.map((m, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: i < val.multiples.length - 1 ? `1px solid ${T.rule}` : "none", fontSize: 12.5 }}>
+                            <span style={{ color: T.sub }}>{m.l}</span>
+                            <span style={{ color: T.ink, fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                              {isFinite(m.v) ? (m.pct ? (m.v * 100).toFixed(m.d || 1) + "%" : num(m.v, m.d || 1) + "×") : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <div style={{ ...label, fontSize: 10, color: T.ink, marginBottom: 8 }}>Returns & balance sheet</div>
+                        {val.quality.map((m, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: i < val.quality.length - 1 ? `1px solid ${T.rule}` : "none", fontSize: 12.5 }}>
+                            <span style={{ color: T.sub }}>{m.l}</span>
+                            <span style={{ color: T.ink, fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                              {isFinite(m.v) ? (m.pct ? (m.v * 100).toFixed(1) + "%" : num(m.v, m.d || 1) + (m.l.indexOf("/") > 0 || m.l.indexOf("coverage") > 0 ? "×" : "")) : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* ── reported history ── */}
+                    <div style={{ ...label, fontSize: 10, color: T.ink, marginBottom: 8 }}>Reported annual financials</div>
+                    <div style={{ overflowX: "auto", marginBottom: 14 }}>
+                      <table style={{ borderCollapse: "collapse", minWidth: 560, width: "100%" }}>
+                        <thead>
+                          <tr>
+                            <th style={th}>Fiscal year</th>
+                            {val.hist.map((h) => <th key={h.year} style={thNum}>{h.year}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[
+                            ["Revenue", "rev"], ["EBIT", "ebit"], ["EBITDA", "ebitda"], ["Net income", "ni"],
+                            ["D&A", "da"], ["Capex", "capex"], ["Operating cash flow", "ocf"], ["Free cash flow", "fcf"],
+                            ["Total debt", "debt"], ["Cash & equivalents", "cash"], ["Shareholders' equity", "equity"],
+                          ].map(([lbl, k]) => (
+                            <tr key={k}>
+                              <td style={{ ...td, color: T.sub }}>{lbl}</td>
+                              {val.hist.map((h) => (
+                                <td key={h.year} style={{ ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{bigMoney(h[k])}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ fontSize: 11.5, color: T.faint, lineHeight: 1.65 }}>
+                      Figures in {valData.currency}, as reported to the exchange. The statements are facts; the projection is not — a DCF is only ever as good as the assumptions above it, which is why they are all editable and why the sensitivity grid is shown alongside the point estimate. This is an analytical tool, not advice to buy or sell anything.
+                    </div>
+                  </>
+                )}
               </>
             )}
           </Panel>
