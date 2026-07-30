@@ -476,12 +476,16 @@ const T = {
 };
 const PALETTE = [T.green, T.steel, T.copper, "#A78BFA", T.red, "#2DD4BF", "#FACC15", "#94A3B8", "#F472B6", T.greenLight];
 
-const pct = (v, d = 1) => (isFinite(v) ? (v * 100).toFixed(d) + "%" : "—");
-const num = (v, d = 2) => (isFinite(v) ? v.toFixed(d) : "—");
-const money = (v) => (isFinite(v) ? "$" + Math.round(v).toLocaleString() : "—");
+/* isFinite() coerces before testing, so isFinite(null) and isFinite("5") are
+   both true — which sends a null straight into .toFixed() and takes the whole
+   app down. Every formatter below tests the type first. */
+const isNum = (v) => typeof v === "number" && isFinite(v);
+const pct = (v, d = 1) => (isNum(v) ? (v * 100).toFixed(d) + "%" : "—");
+const num = (v, d = 2) => (isNum(v) ? v.toFixed(d) : "—");
+const money = (v) => (isNum(v) ? "$" + Math.round(v).toLocaleString() : "—");
 // Statement figures run to the hundreds of billions — scale them so a table stays readable.
 const bigMoney = (v) => {
-  if (!isFinite(v)) return "—";
+  if (!isNum(v)) return "—";
   const s = v < 0 ? "−" : "", a = Math.abs(v);
   if (a >= 1e12) return s + (a / 1e12).toFixed(2) + "T";
   if (a >= 1e9) return s + (a / 1e9).toFixed(1) + "B";
@@ -1014,6 +1018,9 @@ function FrontierApp() {
       const r = await fetch("/api/claude?fund=" + encodeURIComponent(s));
       const d = await r.json();
       if (d.crashed) { setValErr("The data service failed on that request. Try again in a moment."); }
+      else if (d.throttled && !d.haveStatements) {
+        setValErr((d.notes && d.notes[0]) || "The market data provider is rate-limiting requests. Wait a moment and try again.");
+      }
       else if (!d.haveStatements) {
         setValErr((d.notes && d.notes[0]) || ("No company financials are published for " + s + "."));
         setValData(d);

@@ -337,9 +337,34 @@ async function main(req, res) {
       }
       if (q2.marketCap == null && q2.shares && price) q2.marketCap = q2.shares * price;
 
+      // One retry on the price when the first call was throttled — a 429 on the
+      // chart endpoint is transient and shouldn't blank the whole result.
+      if (price == null && (chart.status === 429 || chart.status === 0)) {
+        const again = await tfetch(
+          "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1mo&interval=1d",
+          { headers: { "user-agent": UA } }, 7000
+        );
+        try {
+          const meta = JSON.parse(again.raw).chart.result[0].meta;
+          price = Number(meta.regularMarketPrice);
+          currency = currency || meta.currency || null;
+          name = name || meta.longName || meta.shortName || sym;
+        } catch (e) { /* still unavailable */ }
+      }
+      if (!isFinite(price)) price = null;
+
       const haveStatements = !!(series.TotalRevenue && series.TotalRevenue.length >= 2);
+      // Distinguish "throttled" from "this security has no financials" — telling
+      // someone Apple doesn't publish statements because Yahoo rate-limited us
+      // is worse than telling them nothing.
+      const throttled = tsRes.status === 429 || chart.status === 429;
       const notes = [];
-      if (!haveStatements) notes.push("Annual statement data unavailable for " + sym + " — funds, ETFs and some non-US listings do not report company financials.");
+      if (!haveStatements && throttled) {
+        notes.push("The market data provider is rate-limiting requests right now, so " + sym + "'s filings could not be retrieved. This is temporary — wait a moment and try again.");
+      } else if (!haveStatements) {
+        notes.push("Annual statement data unavailable for " + sym + " — funds, ETFs and some non-US listings do not report company financials.");
+      }
+      if (price == null) notes.push("A live price could not be retrieved" + (throttled ? " (provider rate limit)" : "") + ", so the value-versus-price comparison is unavailable this round.");
       if (!auth) notes.push("Yahoo quote-detail feed was gated this round; multiples were computed from statement data where possible.");
 
       if (getParam("dbg")) {
@@ -352,7 +377,7 @@ async function main(req, res) {
       }
       return res.status(200).json({
         symbol: sym, name: name || sym, currency: currency || "USD",
-        price, quote: q2, series, haveStatements,
+        price, quote: q2, series, haveStatements, throttled,
         notes: notes.length ? notes : undefined,
       });
     }
