@@ -31,6 +31,7 @@ async function main(req, res) {
         .map((p) => p.text || "").join("");
     } catch (e) { return ""; }
   };
+  const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
   const isCad = (s) => /\.(TO|V|NE|CN)$/i.test(s);
   const weeklyClosesOnce = async (sym) => {
     const r = await tfetch(
@@ -209,6 +210,143 @@ async function main(req, res) {
       }
       return res.status(200).json({ vol, beta });
     }
+    /* ── FUNDAMENTALS: reported financials for a DCF ──────────────────
+       Two Yahoo sources. fundamentals-timeseries carries the annual
+       statement lines; quoteSummary carries price/share/multiple data but
+       is crumb-gated, so we fall back to the (never-gated) chart endpoint
+       for price when the crumb handshake fails. Everything returned here
+       is *reported history* — no projections are made server-side. */
+    const fsym = getParam("fund");
+    if (fsym) {
+      const sym = fsym.toUpperCase().trim();
+      const nowS = Math.floor(Date.now() / 1000);
+      const p1 = nowS - 12 * 365 * 24 * 3600;
+
+      const TS_KEYS = [
+        "TotalRevenue", "OperatingIncome", "EBIT", "EBITDA", "NetIncome",
+        "PretaxIncome", "TaxProvision", "TaxRateForCalcs",
+        "ReconciledDepreciation", "DepreciationAndAmortization",
+        "CapitalExpenditure", "ChangeInWorkingCapital", "FreeCashFlow",
+        "OperatingCashFlow", "InterestExpense", "TotalDebt",
+        "CashAndCashEquivalents", "CashCashEquivalentsAndShortTermInvestments",
+        "StockholdersEquity", "OrdinarySharesNumber", "InvestedCapital",
+        "CurrentAssets", "CurrentLiabilities", "NetPPE",
+      ];
+      const types = TS_KEYS.map((k) => "annual" + k).join(",");
+      const tsUrl = "https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/" +
+        encodeURIComponent(sym) + "?symbol=" + encodeURIComponent(sym) +
+        "&type=" + types + "&period1=" + p1 + "&period2=" + nowS + "&merge=false";
+
+      // Crumb handshake: cookie from fc.yahoo.com, then trade it for a crumb.
+      const getCrumb = async () => {
+        try {
+          const c = await fetch("https://fc.yahoo.com", { headers: { "user-agent": UA } });
+          const setC = c.headers.get("set-cookie") || "";
+          const cookie = setC.split(",").map((s) => s.split(";")[0]).filter(Boolean).join("; ");
+          if (!cookie) return null;
+          const cr = await tfetch(
+            "https://query1.finance.yahoo.com/v1/test/getcrumb",
+            { headers: { "user-agent": UA, cookie } }, 6000
+          );
+          if (cr.status !== 200 || !cr.raw || cr.raw.length > 40) return null;
+          return { crumb: cr.raw, cookie };
+        } catch (e) { return null; }
+      };
+
+      const [tsRes, auth, chart] = await Promise.all([
+        tfetch(tsUrl, { headers: { "user-agent": UA } }, 9000),
+        getCrumb(),
+        tfetch(
+          "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1mo&interval=1d",
+          { headers: { "user-agent": UA } }, 7000
+        ),
+      ]);
+
+      // ── annual statement lines → { key: [{year, v}] }
+      const series = {};
+      try {
+        const rows = JSON.parse(tsRes.raw).timeseries.result || [];
+        for (const row of rows) {
+          const t = (row.meta && row.meta.type && row.meta.type[0]) || "";
+          if (!t) continue;
+          const short = t.replace(/^annual/, "");
+          const pts = [];
+          for (const p of (row[t] || [])) {
+            if (!p || p.reportedValue == null) continue;
+            const v = Number(p.reportedValue.raw);
+            const yr = Number(String(p.asOfDate || "").slice(0, 4));
+            if (isFinite(v) && isFinite(yr)) pts.push({ year: yr, v });
+          }
+          pts.sort((a, b) => a.year - b.year);
+          if (pts.length) series[short] = pts;
+        }
+      } catch (e) { /* series stays empty; handled below */ }
+
+      // ── price (chart meta is the reliable floor)
+      let price = null, currency = null, name = null;
+      try {
+        const meta = JSON.parse(chart.raw).chart.result[0].meta;
+        price = Number(meta.regularMarketPrice);
+        currency = meta.currency || null;
+        name = meta.longName || meta.shortName || sym;
+      } catch (e) { /* leave null */ }
+
+      // ── quote/multiple data (best-effort, crumb-gated)
+      let q2 = {};
+      if (auth) {
+        const mods = "financialData,defaultKeyStatistics,summaryDetail,price,summaryProfile";
+        const qs = await tfetch(
+          "https://query1.finance.yahoo.com/v10/finance/quoteSummary/" + encodeURIComponent(sym) +
+          "?modules=" + mods + "&crumb=" + encodeURIComponent(auth.crumb),
+          { headers: { "user-agent": UA, cookie: auth.cookie } }, 9000
+        );
+        try {
+          const r0 = JSON.parse(qs.raw).quoteSummary.result[0] || {};
+          const num = (x) => (x && typeof x.raw === "number" && isFinite(x.raw) ? x.raw : null);
+          const fd = r0.financialData || {}, ks = r0.defaultKeyStatistics || {},
+            sd = r0.summaryDetail || {}, pr = r0.price || {}, sp = r0.summaryProfile || {};
+          q2 = {
+            marketCap: num(pr.marketCap) ?? num(sd.marketCap),
+            shares: num(ks.sharesOutstanding),
+            beta: num(ks.beta) ?? num(sd.beta),
+            trailingPE: num(sd.trailingPE), forwardPE: num(sd.forwardPE),
+            priceToBook: num(ks.priceToBook),
+            enterpriseValue: num(ks.enterpriseValue),
+            evToEbitda: num(ks.enterpriseToEbitda), evToRevenue: num(ks.enterpriseToRevenue),
+            pegRatio: num(ks.pegRatio),
+            dividendYield: num(sd.dividendYield),
+            totalCash: num(fd.totalCash), totalDebt: num(fd.totalDebt),
+            ebitda: num(fd.ebitda), revenue: num(fd.totalRevenue),
+            operatingMargin: num(fd.operatingMargins), profitMargin: num(fd.profitMargins),
+            returnOnEquity: num(fd.returnOnEquity),
+            revenueGrowth: num(fd.revenueGrowth), earningsGrowth: num(fd.earningsGrowth),
+            targetMean: num(fd.targetMeanPrice),
+            sector: sp.sector || null, industry: sp.industry || null,
+          };
+          if (!name && pr.longName) name = pr.longName;
+          if (!currency && pr.currency) currency = pr.currency;
+          if (price == null) price = num(pr.regularMarketPrice);
+        } catch (e) { q2 = {}; }
+      }
+
+      // shares fallback from the balance-sheet line when quoteSummary is gated
+      if (q2.shares == null && series.OrdinarySharesNumber && series.OrdinarySharesNumber.length) {
+        q2.shares = series.OrdinarySharesNumber[series.OrdinarySharesNumber.length - 1].v;
+      }
+      if (q2.marketCap == null && q2.shares && price) q2.marketCap = q2.shares * price;
+
+      const haveStatements = !!(series.TotalRevenue && series.TotalRevenue.length >= 2);
+      const notes = [];
+      if (!haveStatements) notes.push("Annual statement data unavailable for " + sym + " — funds, ETFs and some non-US listings do not report company financials.");
+      if (!auth) notes.push("Yahoo quote-detail feed was gated this round; multiples were computed from statement data where possible.");
+
+      return res.status(200).json({
+        symbol: sym, name: name || sym, currency: currency || "USD",
+        price, quote: q2, series, haveStatements,
+        notes: notes.length ? notes : undefined,
+      });
+    }
+
     const q = getParam("search");
     if (q) {
       const r = await tfetch(
