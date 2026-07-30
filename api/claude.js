@@ -31,7 +31,9 @@ async function main(req, res) {
         .map((p) => p.text || "").join("");
     } catch (e) { return ""; }
   };
-  const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  // Yahoo 429s a full spoofed Chrome UA from datacenter IPs but serves the
+  // bare token fine — this is the exact string the working chart path uses.
+  const UA = "Mozilla/5.0";
   const isCad = (s) => /\.(TO|V|NE|CN)$/i.test(s);
   const weeklyClosesOnce = async (sym) => {
     const r = await tfetch(
