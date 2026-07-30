@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { track } from "@vercel/analytics";
+import { supabase, authEnabled, fetchProfile, loadBook, saveBook, currentAccessToken } from "./lib/supabase";
 import * as math from "mathjs";
 import {
   Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -932,6 +933,92 @@ function FrontierApp() {
   React.useEffect(() => {
     ev("screen", { screen: view === "app" ? "app:" + mode : view, plan });
   }, [view, mode, plan]);
+
+  /* ---- accounts (optional: off entirely when Supabase isn't configured) ---- */
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMsg, setAuthMsg] = useState(null);
+  const [authErr, setAuthErr] = useState(null);
+  const [authMode, setAuthMode] = useState("signin"); // signin | signup | magic
+  const [auEmail, setAuEmail] = useState("");
+  const [auPass, setAuPass] = useState("");
+  const user = session && session.user;
+
+  React.useEffect(() => {
+    if (!authEnabled) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s || null));
+    return () => { try { sub.subscription.unsubscribe(); } catch (e) {} };
+  }, []);
+
+  // The signed-in plan comes from the server and overrides whatever the browser
+  // had cached, so clearing storage or switching machines keeps Pro.
+  React.useEffect(() => {
+    if (!authEnabled || !user) { setProfile(null); return; }
+    let live = true;
+    (async () => {
+      const pr = await fetchProfile(user.id);
+      if (!live) return;
+      setProfile(pr);
+      if (pr && pr.plan) setPlan(pr.plan);
+      const remote = await loadBook(user.id);
+      if (!live || !remote) return;
+      const a2 = sanitizeAssets(remote.assets);
+      if (a2) {
+        setAssets(a2);
+        setCorr(normalizeCorr(remote.corr, a2.length));
+        setCorrReal(null);
+      }
+      const h2 = sanitizeHoldings(remote.bHoldings);
+      if (h2) setBHoldings(h2);
+      if (isFinite(Number(remote.rf))) setRf(Number(remote.rf));
+      if (isFinite(Number(remote.A))) setA(Number(remote.A));
+    })();
+    return () => { live = false; };
+  }, [user && user.id]);
+
+  const signOut = async () => {
+    if (!authEnabled) return;
+    await supabase.auth.signOut();
+    setProfile(null);
+    setPlan("free");
+    setShowAuth(false);
+  };
+
+  const submitAuth = async () => {
+    setAuthErr(null); setAuthMsg(null);
+    const email = auEmail.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setAuthErr("Enter a valid email address."); return; }
+    if (authMode !== "magic" && auPass.length < 8) { setAuthErr("Password must be at least 8 characters."); return; }
+    setAuthBusy(true);
+    try {
+      if (authMode === "magic") {
+        const { error } = await supabase.auth.signInWithOtp({
+          email, options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) throw error;
+        setAuthMsg("Check your email for a sign-in link.");
+        ev("auth", { action: "magic_link" });
+      } else if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email, password: auPass, options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) throw error;
+        ev("auth", { action: "signup" });
+        if (data && data.session) { setShowAuth(false); setAuPass(""); }
+        else setAuthMsg("Account created. Check your email to confirm it, then sign in.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: auPass });
+        if (error) throw error;
+        ev("auth", { action: "signin" });
+        setShowAuth(false); setAuPass("");
+      }
+    } catch (e) {
+      setAuthErr((e && e.message) || "Something went wrong. Try again.");
+    } finally { setAuthBusy(false); }
+  };
   const [mktLoading, setMktLoading] = useState(false);
   const [mktNote, setMktNote] = useState(null);
   // n×n flags: which correlations were actually measured vs still placeholder.
@@ -1045,8 +1132,17 @@ function FrontierApp() {
     setValLoading(true); setValErr(null); setValData(null); setValOv({});
     ev("valuation_run", { symbol: s });
     try {
-      const r = await fetch("/api/claude?fund=" + encodeURIComponent(s));
+      // The server re-checks entitlement, so the session token has to travel
+      // with the request — the React `isPro` flag proves nothing to the API.
+      const token = await currentAccessToken();
+      const r = await fetch("/api/claude?fund=" + encodeURIComponent(s),
+        token ? { headers: { authorization: "Bearer " + token } } : undefined);
       const d = await r.json();
+      if (r.status === 403 || d.error === "pro_required") {
+        setValErr(d.message || "The valuation lab is part of Pro. Sign in with a Pro account to use it.");
+        setValLoading(false);
+        return;
+      }
       if (d.crashed) { setValErr("The data service failed on that request. Try again in a moment."); }
       else if (d.throttled && !d.haveStatements) {
         setValErr((d.notes && d.notes[0]) || "The market data provider is rate-limiting requests. Wait a moment and try again.");
@@ -1063,6 +1159,15 @@ function FrontierApp() {
   React.useEffect(() => {
     try { localStorage.setItem("fx_book", JSON.stringify({ assets, corr, rf, A, bHoldings })); } catch (e) {}
   }, [assets, corr, rf, A, bHoldings]);
+
+  /* Mirror the book to the account, debounced so a slider drag isn't a write
+     per frame. localStorage stays the fast path; this is what makes the book
+     follow you to another browser. */
+  React.useEffect(() => {
+    if (!authEnabled || !user) return;
+    const t = setTimeout(() => { saveBook(user.id, { assets, corr, rf, A, bHoldings }); }, 1500);
+    return () => clearTimeout(t);
+  }, [user && user.id, assets, corr, rf, A, bHoldings]);
 
   /* Pull real volatilities, betas and correlations whenever the set of tickers
      changes. Without this the model silently runs on a 0.35 placeholder
@@ -1379,6 +1484,55 @@ function FrontierApp() {
     setCkCard(""); setCkExp(""); setCkCvc("");
   };
   const ckField = { width: "100%", padding: "11px 13px", border: `1px solid ${T.ruleDark}`, borderRadius: T.radiusMd, fontFamily: T.mono, fontSize: 13.5, color: T.ink, background: T.surface, outline: "none", boxSizing: "border-box" };
+
+  /* ═════════ ACCOUNT ═════════ */
+  const AuthModal = () => (
+    <div onClick={() => setShowAuth(false)} style={{ position: "fixed", inset: 0, background: "rgba(3,7,18,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radius, boxShadow: T.shadow, maxWidth: 400, width: "100%", padding: 28 }}>
+        <h2 style={{ fontFamily: T.disp, fontSize: 20, fontWeight: 800, margin: "0 0 4px", color: T.ink }}>
+          {authMode === "signup" ? "Create an account" : authMode === "magic" ? "Email me a link" : "Sign in"}
+        </h2>
+        <p style={{ fontSize: 12.5, color: T.sub, margin: "0 0 18px", lineHeight: 1.6 }}>
+          Your plan and your saved portfolio follow the account, not the browser — clear your data or switch machines and everything is still there.
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <input type="email" placeholder="you@example.com" value={auEmail} autoComplete="email"
+            onChange={(e) => setAuEmail(e.target.value)} style={ckField} />
+          {authMode !== "magic" && (
+            <input type="password" placeholder="Password (8+ characters)" value={auPass}
+              autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+              onChange={(e) => setAuPass(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submitAuth(); }} style={ckField} />
+          )}
+        </div>
+
+        {authErr && <div style={{ fontSize: 12, color: T.red, marginTop: 10 }}>{authErr}</div>}
+        {authMsg && <div style={{ fontSize: 12, color: T.green, marginTop: 10 }}>{authMsg}</div>}
+
+        <div style={{ marginTop: 16 }}>
+          <Btn primary wide pill onClick={submitAuth} disabled={authBusy}>
+            {authBusy ? "Working…" : authMode === "signup" ? "Create account" : authMode === "magic" ? "Send link" : "Sign in"}
+          </Btn>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, fontSize: 11.5, flexWrap: "wrap", gap: 8 }}>
+          <span onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthErr(null); setAuthMsg(null); }}
+            style={{ color: T.green, cursor: "pointer", textDecoration: "underline" }}>
+            {authMode === "signup" ? "I already have an account" : "Create an account"}
+          </span>
+          <span onClick={() => { setAuthMode(authMode === "magic" ? "signin" : "magic"); setAuthErr(null); setAuthMsg(null); }}
+            style={{ color: T.sub, cursor: "pointer", textDecoration: "underline" }}>
+            {authMode === "magic" ? "Use a password" : "Email me a link instead"}
+          </span>
+        </div>
+
+        <div style={{ fontSize: 10.5, color: T.faint, marginTop: 16, lineHeight: 1.6, paddingTop: 12, borderTop: `1px solid ${T.rule}` }}>
+          Passwords are handled by Supabase and never reach this app's code. FrontierX stores only your email, your plan, and the portfolio you enter.
+        </div>
+      </div>
+    </div>
+  );
   const Checkout = () => (
     <div onClick={() => setShowCheckout(null)} style={{ position: "fixed", inset: 0, background: "rgba(3,7,18,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radius, boxShadow: T.shadow, maxWidth: 420, width: "100%", padding: 28 }}>
@@ -2509,6 +2663,7 @@ function FrontierApp() {
         .fx-blob{animation-name:fxBlob; animation-timing-function:ease-in-out; animation-iteration-count:infinite;}`}</style>
       {showPaywall && Paywall()}
       {showCheckout && Checkout()}
+      {showAuth && authEnabled && AuthModal()}
       {briefTicker && (
         <div onClick={() => setBriefTicker(null)} style={{ position: "fixed", inset: 0, background: "rgba(3,7,18,0.72)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 55, padding: 16 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: T.band, border: `1px solid ${T.rule}`, borderRadius: T.radius, boxShadow: T.shadow, maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto", padding: 24 }}>
@@ -2559,9 +2714,19 @@ function FrontierApp() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {view === "landing" && <span onClick={() => setView("app")} style={{ fontSize: 12.5, fontWeight: 700, color: T.sub, cursor: "pointer" }}>Workspace</span>}
-            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", color: isAdv ? T.green : T.sub, background: isAdv ? "rgba(16,185,129,0.12)" : T.surface, borderRadius: T.pill, padding: "4px 11px" }}>
-              {plan.toUpperCase()}
+            <span
+              title={profile ? "Plan is stored on your account and verified by the server" : "Plan is stored in this browser only — sign in to keep it"}
+              style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", color: isAdv ? T.green : T.sub, background: isAdv ? "rgba(16,185,129,0.12)" : T.surface, borderRadius: T.pill, padding: "4px 11px" }}>
+              {plan.toUpperCase()}{profile ? " · SYNCED" : ""}
             </span>
+            {authEnabled && (user ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <span title={user.email} style={{ fontSize: 11.5, color: T.sub, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</span>
+                <span onClick={signOut} style={{ fontSize: 11.5, fontWeight: 700, color: T.faint, cursor: "pointer", textDecoration: "underline" }}>Sign out</span>
+              </span>
+            ) : (
+              <Btn small pill onClick={() => { setAuthMode("signin"); setAuthErr(null); setAuthMsg(null); setShowAuth(true); }}>Sign in</Btn>
+            ))}
             {!isPro && <Btn small primary pill onClick={() => setShowPaywall(true)}>Upgrade</Btn>}
           </div>
         </div>

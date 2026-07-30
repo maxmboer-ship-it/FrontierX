@@ -34,6 +34,41 @@ async function main(req, res) {
   // Yahoo 429s a full spoofed Chrome UA from datacenter IPs but serves the
   // bare token fine — this is the exact string the working chart path uses.
   const UA = "Mozilla/5.0";
+
+  /* ── Server-side entitlement ──────────────────────────────────────
+     Verifies the caller's Supabase access token and reads their plan
+     from the profiles table, which they have no write policy on. A
+     flipped flag in devtools changes the UI but not what this returns,
+     so Pro-only data stays Pro-only.
+
+     When Supabase is not configured the gate opens — the site keeps
+     working exactly as it did before accounts existed rather than
+     locking everyone out of a half-provisioned deployment. */
+  const SB_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  const SB_ANON = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+  const authConfigured = Boolean(SB_URL && SB_ANON);
+
+  const planOf = async () => {
+    if (!authConfigured) return { plan: "pro", enforced: false };
+    const raw = (req.headers && (req.headers.authorization || req.headers.Authorization)) || "";
+    const token = raw.startsWith("Bearer ") ? raw.slice(7) : "";
+    if (!token) return { plan: "free", enforced: true };
+    const who = await tfetch(SB_URL + "/auth/v1/user",
+      { headers: { apikey: SB_ANON, authorization: "Bearer " + token } }, 6000);
+    if (who.status !== 200) return { plan: "free", enforced: true };
+    let uid = "";
+    try { uid = JSON.parse(who.raw).id || ""; } catch (e) { return { plan: "free", enforced: true }; }
+    if (!uid) return { plan: "free", enforced: true };
+    // RLS lets the token read only its own row, so no service key is needed here.
+    const pr = await tfetch(
+      SB_URL + "/rest/v1/profiles?select=plan&id=eq." + encodeURIComponent(uid),
+      { headers: { apikey: SB_ANON, authorization: "Bearer " + token } }, 6000);
+    try {
+      const rows = JSON.parse(pr.raw);
+      const p = rows && rows[0] && rows[0].plan;
+      return { plan: p === "pro" || p === "advanced" ? p : "free", enforced: true, uid };
+    } catch (e) { return { plan: "free", enforced: true, uid }; }
+  };
   const isCad = (s) => /\.(TO|V|NE|CN)$/i.test(s);
   const weeklyClosesOnce = async (sym) => {
     const r = await tfetch(
@@ -220,6 +255,14 @@ async function main(req, res) {
        is *reported history* — no projections are made server-side. */
     const fsym = getParam("fund");
     if (fsym) {
+      // Valuation is a Pro feature and the check happens here, not in React.
+      const ent = await planOf();
+      if (ent.enforced && ent.plan !== "pro") {
+        return res.status(403).json({
+          error: "pro_required",
+          message: "The valuation lab is part of Pro. Sign in with a Pro account to use it.",
+        });
+      }
       const sym = fsym.toUpperCase().trim();
       const nowS = Math.floor(Date.now() / 1000);
       const p1 = nowS - 12 * 365 * 24 * 3600;
